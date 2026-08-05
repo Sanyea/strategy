@@ -2,7 +2,7 @@ spring:
   application:
     name: strategy
   datasource:
-    url: jdbc:mysql://10.244.166.138:3306/sys_strategy?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://10.244.166.140:3306/sys_strategy?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
     username: root
     password: root123456
     driver-class-name: com.mysql.cj.jdbc.Driver

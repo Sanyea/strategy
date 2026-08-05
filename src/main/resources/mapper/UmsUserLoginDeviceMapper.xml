@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sanye.strategy.mapper.UmsUserLoginDeviceMapper">
+
+    <resultMap id="BaseResultMap" type="com.sanye.strategy.po.UmsUserLoginDevicePO">
+            <id property="id" column="id" />
+            <result property="userId" column="user_id" />
+            <result property="deviceType" column="device_type" />
+            <result property="deviceOs" column="device_os" />
+            <result property="deviceBrand" column="device_brand" />
+            <result property="deviceModel" column="device_model" />
+            <result property="deviceId" column="device_id" />
+            <result property="appVersion" column="app_version" />
+            <result property="loginIp" column="login_ip" />
+            <result property="loginTime" column="login_time" />
+            <result property="expireTime" column="expire_time" />
+            <result property="isCurrent" column="is_current" />
+            <result property="deleted" column="deleted" />
+            <result property="createTime" column="create_time" />
+            <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,user_id,device_type,device_os,device_brand,device_model,
+        device_id,app_version,login_ip,login_time,expire_time,
+        is_current,deleted,create_time,update_time
+    </sql>
+</mapper>

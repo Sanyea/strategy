@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sanye.strategy.mapper.UmsUserProfileMapper">
+
+    <resultMap id="BaseResultMap" type="com.sanye.strategy.po.UmsUserProfilePO">
+            <id property="id" column="id" />
+            <result property="userId" column="user_id" />
+            <result property="country" column="country" />
+            <result property="province" column="province" />
+            <result property="city" column="city" />
+            <result property="district" column="district" />
+            <result property="address" column="address" />
+            <result property="occupation" column="occupation" />
+            <result property="education" column="education" />
+            <result property="incomeLevel" column="income_level" />
+            <result property="contactPhone" column="contact_phone" />
+            <result property="contactEmail" column="contact_email" />
+            <result property="signature" column="signature" />
+            <result property="bgImage" column="bg_image" />
+            <result property="extInfo" column="ext_info" />
+            <result property="deleted" column="deleted" />
+            <result property="createTime" column="create_time" />
+            <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,user_id,country,province,city,district,
+        address,occupation,education,income_level,contact_phone,
+        contact_email,signature,bg_image,ext_info,deleted,
+        create_time,update_time
+    </sql>
+</mapper>

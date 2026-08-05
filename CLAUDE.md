@@ -26,6 +26,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 纯增量/机械性修改（已知方案下的编码、重构、批处理）：直接走快速模式，不重复推演。
 - 快速执行中若发现方案假设不成立或接口定义不明，回到深度思考确认，不硬猜。
 
+## 分支与提交规范
+
+- **AI 开发与提交仅在 `AI` 分支进行**：代码编写、文件修改、`git commit` 一律在 `AI` 分支执行，禁止直接在 `dev`（及 `main`）分支开发或提交。
+- **合并到 `dev` 需用户确认**：`AI` 分支开发完成后，等待用户确认当前分支开发无误，再由 AI 将 `AI` 分支合并到 `dev`。
+- 合并后由用户决定是否删除 `AI` 分支或新建后续 `AI` 分支，AI 不擅自操作。
+
 ## 构建与运行
 
 ```bash
@@ -53,7 +59,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=test
 ## 技术栈
 
 - Java 21，Spring Boot 4.1.0，Maven
-- MyBatis-Plus 3.5.17（`com.baomidou:mybatis-plus-spring-boot3-starter`）— ORM，支持代码生成
+- MyBatis-Plus 3.5.15（`com.baomidou:mybatis-plus-spring-boot4-starter`）— ORM，支持代码生成。**须用 boot4-starter 匹配 Spring Boot 4**：boot3-starter 的自动装配在 Boot 4 下 `@ConditionalOnSingleCandidate(DataSource)` 评估过早，SqlSessionFactory 不创建
 - MySQL，通过 `mysql-connector-j`
 - Lombok（maven-compiler-plugin 中配置了注解处理器）
 - Spring Boot Actuator，用于健康检查/监控端点
@@ -67,7 +73,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=test
 **核心原则：**
 - Controller 依赖 `IBaseService<T>`（顶层接口），不依赖任何框架类型
 - Service 层依赖自定义 `IWrapper<T>` / `IBasePage<T>`，不直接使用 MyBatis-Plus 的 `QueryWrapper` / `Page`
-- 仅 `MpBaseServiceImpl` 持有 MyBatis-Plus 引用，框架耦合隔离在此
+- MP 行为耦合收口两处：`MpBaseServiceImpl`（CRUD 桥接）+ `common/config` 的枚举 `DeleteFlagEnumTypeHandler`（实体基类层枚举持久化适配）；枚举映射为声明式例外，见「实体与持久化对象（PO）双层分离」
 - DTO 组合分页参数，禁止 DTO 继承分页对象
 
 ### 自定义抽象层（零框架依赖）
@@ -297,20 +303,28 @@ public class R<T> {
 
 **转换：** `MpBaseServiceImpl<P, M, T>` 桥接层通过抽象钩子 `toPO(T)` / `toEntity(P)` 完成实体↔PO 互转，子类用 `BeanCopyUtils.copy()`（`common.util`）实现。
 
+**包位置：** 实体在 `com.sanye.strategy.domain`，PO 在 `com.sanye.strategy.po`，一一对应（`UmsUser` ↔ `UmsUserPO`）。
+
+**业务枚举：** 状态/类型/标记字段（`gender`、`userType`、`userStatus`、`isVip`、`identityType` 等）抽成 `com.sanye.strategy.enums` 包下枚举类，`@EnumValue` 标注映射码（Integer 或 String），MyBatis-Plus 自动完成 枚举↔DB 互转。实体与 PO **共用同一枚举类**，`BeanCopyUtils` 同名同类型直接复制，无额外转换。查找枚举用静态 `valueOf(code)`；String 码枚举（如 `IdentityTypeEnum`）因与内置 `valueOf(String)` 签名冲突，改用 `valueOfCode(code)`。业务枚举统一进 `enums`。
+
+**实体基类层枚举（约定式解耦）：** 仅 `DeleteFlagEnum`（`common.base`，`SimpleBaseEntity`/`SimpleBasePO` 的 `deleted` 字段）走约定式彻底解耦——枚举只实现纯接口 `IPersistEnum<T>`（`getPersistValue()` 返回映射码，零框架依赖），**不使用** `@EnumValue`。持久化适配由 `common/config/DeleteFlagEnumTypeHandler` 承担：写库取 `getPersistValue()`，读库经 `DeleteFlagEnum.valueOf(code)` 还原；通过 `mybatis-plus.type-handlers-package` 扫描 + `@MappedTypes` 注册，PO 层字段声明与上层业务代码完全不动。新增实体基类层枚举时沿用此约定（实现 `IPersistEnum` + 补一个 TypeHandler）。
+
 **自动填充：** `MetaObjectHandler` 已注册（`MybatisPlusConfig`），插入/更新时填充 PO 的 `createTime`/`updateTime`；`createUserId`/`updateUserId` 待用户上下文（Spring Security/拦截器）接入后补充，当前写入 NULL。
 
 **判断规则：** 系统级表（登录设备、认证绑定、安全日志）继承 `SimpleBaseEntity`。有人工操作、需要追溯操作人的业务表继承 `BaseEntity`。对应 PO 同理选 `SimpleBasePO` / `BasePO`。
 
-`deleted` 字段使用 `DeleteFlagEnum`（`NOT_DELETED=0`，`DELETED=1`），配合 `@EnumValue` 实现类型安全的枚举映射。MyBatis-Plus 的 `@TableLogic` 自动过滤已删除行。
+`deleted` 字段使用 `DeleteFlagEnum`（`NOT_DELETED=0`，`DELETED=1`），实现 `IPersistEnum<Integer>` 约定式映射，持久化由 `DeleteFlagEnumTypeHandler` 桥接（见上文）。MyBatis-Plus 的 `@TableLogic` 自动过滤已删除行。
 
 ### 包结构
 
 ```
 com.sanye.strategy
-├── domain/           — 实体类，每表一个，使用 @TableName 注解
-├── mapper/           — MyBatis-Plus BaseMapper 接口，XML 结果映射在 resources/mapper/
+├── domain/           — 实体类（纯 POJO，继承 SimpleBaseEntity/BaseEntity），每表一个
+├── enums/            — 业务枚举类（@EnumValue 类型安全映射，实体与 PO 共用同一套枚举）
+├── po/               — PO 类（继承 SimpleBasePO/BasePO，@TableName + MP 映射注解），Mapper 操作对象
+├── mapper/           — MyBatis-Plus BaseMapper<XxxPO> 接口，XML 结果映射在 resources/mapper/
 ├── service/          — 业务 Service 接口（继承 IService<T>）
-│   └── impl/         — 业务 Service 实现（继承 MpBaseServiceImpl<M, T>）
+│   └── impl/         — 业务 Service 实现（继承 MpBaseServiceImpl<P, M, T>）
 ├── controller/       — Controller，继承 BaseController<T, S, Q, V>
 ├── common/
 │   ├── base/         — IBaseService<T>、IService<T>、AbstractBaseService<T>
@@ -321,7 +335,8 @@ com.sanye.strategy
 │   ├── model/        — IBasePage<T>、BasePage<T>、BasePageDTO<T>、DTO 类
 │   ├── response/     — R<T> 统一响应包装、ResultCode 状态码枚举
 │   ├── annotation/   — 自定义注解（待实现）
-│   ├── config/       — Spring 配置（MybatisPlusConfig：分页拦截器 + MetaObjectHandler）
+│   ├── config/       — Spring 配置（MybatisPlusConfig：分页拦截器 + MetaObjectHandler；
+│   │                   DeleteFlagEnumTypeHandler：IPersistEnum 枚举持久化适配）
 │   ├── constant/     — 常量（待实现）
 │   ├── exception/    — BizException（业务异常）、GlobalExceptionHandler（全局异常处理）
 │   ├── interceptor/  — 拦截器（待实现）
@@ -365,6 +380,7 @@ common 层 DIP 初版经代码审查发现若干缺陷，详见 `docs/code-revie
 | ✅ 已修复 | `in()` 传 List 变单参绑定 | `DefaultQueryWrapper.in` | 单 `Collection` 参数构建期展平为数组 |
 | ✅ 已修复 | 比较/模糊操作符传 null → `= NULL` 永不匹配 | `DefaultQueryWrapper` | null 视为未提供，条件跳过（等价 MP `eq(boolean,...)` 空值防护） |
 | 🟠 | 逻辑删除 + 唯一键 → 标识永久占用 | `sql/user.sql` | 删号后无法重注册用户名/手机号 |
+| 🟠 | `ums_user_profile.ext_info` JSON 列无类型处理器 | `UmsUserProfilePO` | 暂以 String 存取（JSON 文本）；MP 的 `JacksonTypeHandler` 基于 Jackson 2（`com.fasterxml.jackson.*`），Spring Boot 4 默认 Jackson 3（`tools.jackson.*`），命名空间不兼容，序列化策略待定 |
 
 **新增代码注意事项：**
 - `saveOrUpdate` 已修复（沿继承链取主键）；批量方法经 `doInTransaction` 事务钩子执行并聚合逐行结果，事务收口于 `MpBaseServiceImpl`，`AbstractBaseService` 保持纯 POJO。
@@ -375,9 +391,9 @@ common 层 DIP 初版经代码审查发现若干缺陷，详见 `docs/code-revie
 
 项目使用 MyBatis-Plus 代码生成器。生成类遵循统一模式（实体/PO 双层）：
 - Domain 实体：纯 POJO，Lombok `@Data`，继承 `SimpleBaseEntity` / `BaseEntity`
-- PO：继承 `SimpleBasePO` / `BasePO`，`@TableName` + 列映射注解，Mapper 操作对象
+- PO：放 `com.sanye.strategy.po` 包，继承 `SimpleBasePO` / `BasePO`，`@TableName` + 列映射注解，Mapper 操作对象
 - Mapper 接口继承 `BaseMapper<XxxPO>`，配 XML 结果映射
 - Service 接口继承 `IService<XxxEntity>`，实现类继承 `MpBaseServiceImpl<XxxPO, XxxMapper, XxxEntity>`，实现 `toPO`/`toEntity`（用 `BeanCopyUtils`）
 - Controller 继承 `BaseController<XxxEntity, S extends IBaseService<XxxEntity>, Q, V>`
 
-新增表时，生成实体 + PO + mapper/service 三件套，根据表是否需要操作人审计决定继承 `SimpleBaseEntity`/`BasePO` 还是 `BaseEntity`/`BasePO`。
+新增表时，生成实体 + PO + mapper/service 三件套，根据表是否需要操作人审计决定继承 `SimpleBaseEntity`/`SimpleBasePO` 还是 `BaseEntity`/`BasePO`。

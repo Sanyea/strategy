@@ -1,7 +1,5 @@
 package com.sanye.strategy.common.base;
 
-import com.baomidou.mybatisplus.annotation.EnumValue;
-
 import lombok.Getter;
 
 /**
@@ -19,7 +17,7 @@ import lombok.Getter;
  * @author 31372
  */
 @Getter
-public enum DeleteFlagEnum {
+public enum DeleteFlagEnum implements IPersistEnum<Integer> {
 
     /**
      * 未删除
@@ -34,7 +32,6 @@ public enum DeleteFlagEnum {
     /**
      * 状态码
      */
-    @EnumValue
     private final Integer code;
 
     /**
@@ -81,5 +78,10 @@ public enum DeleteFlagEnum {
      */
     public boolean isNotDeleted() {
         return this == NOT_DELETED;
+    }
+
+    @Override
+    public Integer getPersistValue() {
+        return code;
     }
 }

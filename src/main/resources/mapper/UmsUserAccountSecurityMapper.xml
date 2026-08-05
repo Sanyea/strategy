@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sanye.strategy.mapper.UmsUserAccountSecurityMapper">
+
+    <resultMap id="BaseResultMap" type="com.sanye.strategy.po.UmsUserAccountSecurityPO">
+            <id property="id" column="id" />
+            <result property="userId" column="user_id" />
+            <result property="passwordErrorCount" column="password_error_count" />
+            <result property="lockTime" column="lock_time" />
+            <result property="lastPasswordResetTime" column="last_password_reset_time" />
+            <result property="hasSetPayPassword" column="has_set_pay_password" />
+            <result property="payPassword" column="pay_password" />
+            <result property="paySalt" column="pay_salt" />
+            <result property="secretQuestionStatus" column="secret_question_status" />
+            <result property="mfaStatus" column="mfa_status" />
+            <result property="mfaSecret" column="mfa_secret" />
+            <result property="deleted" column="deleted" />
+            <result property="createTime" column="create_time" />
+            <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,user_id,password_error_count,lock_time,last_password_reset_time,has_set_pay_password,
+        pay_password,pay_salt,secret_question_status,mfa_status,mfa_secret,
+        deleted,create_time,update_time
+    </sql>
+</mapper>

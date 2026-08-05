@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sanye.strategy.mapper.UmsUserMapper">
+
+    <resultMap id="BaseResultMap" type="com.sanye.strategy.po.UmsUserPO">
+            <id property="id" column="id" />
+            <result property="username" column="username" />
+            <result property="nickname" column="nickname" />
+            <result property="realName" column="real_name" />
+            <result property="password" column="password" />
+            <result property="salt" column="salt" />
+            <result property="phone" column="phone" />
+            <result property="phoneCountryCode" column="phone_country_code" />
+            <result property="email" column="email" />
+            <result property="avatar" column="avatar" />
+            <result property="gender" column="gender" />
+            <result property="birthday" column="birthday" />
+            <result property="idCardNo" column="id_card_no" />
+            <result property="idCardStatus" column="id_card_status" />
+            <result property="userType" column="user_type" />
+            <result property="userStatus" column="user_status" />
+            <result property="registerChannel" column="register_channel" />
+            <result property="registerClientIp" column="register_client_ip" />
+            <result property="registerDeviceId" column="register_device_id" />
+            <result property="lastLoginTime" column="last_login_time" />
+            <result property="lastLoginIp" column="last_login_ip" />
+            <result property="lastLoginDeviceId" column="last_login_device_id" />
+            <result property="userLevel" column="user_level" />
+            <result property="userPoint" column="user_point" />
+            <result property="userBalance" column="user_balance" />
+            <result property="isVip" column="is_vip" />
+            <result property="vipExpireTime" column="vip_expire_time" />
+            <result property="remark" column="remark" />
+            <result property="deleted" column="deleted" />
+            <result property="createUserId" column="create_user_id" />
+            <result property="updateUserId" column="update_user_id" />
+            <result property="createTime" column="create_time" />
+            <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,username,nickname,real_name,password,salt,
+        phone,phone_country_code,email,avatar,gender,
+        birthday,id_card_no,id_card_status,user_type,user_status,
+        register_channel,register_client_ip,register_device_id,last_login_time,last_login_ip,
+        last_login_device_id,user_level,user_point,user_balance,is_vip,
+        vip_expire_time,remark,deleted,create_user_id,update_user_id,
+        create_time,update_time
+    </sql>
+</mapper>

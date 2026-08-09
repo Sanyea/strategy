@@ -6,7 +6,6 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.sanye.strategy.common.model.BasePage;
 import com.sanye.strategy.common.model.IBasePage;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.Serializable;
@@ -89,7 +88,7 @@ public abstract class MpBaseServiceImpl<P extends SimpleBasePO, M extends BaseMa
     protected M baseMapper;
 
     @Autowired
-    protected PlatformTransactionManager transactionManager;
+    protected TransactionTemplate transactionTemplate;
 
     // ==================== 实体 ↔ PO 转换（子类实现） ====================
 
@@ -115,13 +114,13 @@ public abstract class MpBaseServiceImpl<P extends SimpleBasePO, M extends BaseMa
      * 覆写事务钩子 — 以 Spring 编程式事务执行
      * <p>
      * 批量方法经 {@link AbstractBaseService#doInTransaction} 进入此处，
-     * 任一操作失败整体回滚。替换事务实现（JTA/Atomikos/Seata）只需替换
-     * {@link PlatformTransactionManager} Bean，或覆写本方法。
+     * 任一操作失败整体回滚。事务模板 Bean 定义于 common/config 的
+     * {@code TransactionConfig}（基于 {@code PlatformTransactionManager} 构建）；
+     * 替换事务实现（JTA/Atomikos/Seata）只换该 Bean，或覆写本方法。
      * </p>
      */
     @Override
     protected <R> R doInTransaction(Supplier<R> action) {
-        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
         return transactionTemplate.execute(status -> action.get());
     }
 
@@ -333,46 +332,46 @@ public abstract class MpBaseServiceImpl<P extends SimpleBasePO, M extends BaseMa
     }
 
     @Override
-    protected boolean doInsertBatch(Collection<T> entityList) {
+    protected int doInsertBatch(Collection<T> entityList) {
         if (entityList == null || entityList.isEmpty()) {
-            return false;
+            return 0;
         }
-        boolean allSuccess = true;
+        int affected = 0;
         for (T entity : entityList) {
-            allSuccess &= baseMapper.insert(toPO(entity)) > 0;
+            affected += baseMapper.insert(toPO(entity)) > 0 ? 1 : 0;
         }
-        return allSuccess;
+        return affected;
     }
 
     @Override
-    protected boolean doUpdateBatch(Collection<T> entityList) {
+    protected int doUpdateBatch(Collection<T> entityList) {
         if (entityList == null || entityList.isEmpty()) {
-            return false;
+            return 0;
         }
-        boolean allSuccess = true;
+        int affected = 0;
         for (T entity : entityList) {
-            allSuccess &= baseMapper.updateById(toPO(entity)) > 0;
+            affected += baseMapper.updateById(toPO(entity)) > 0 ? 1 : 0;
         }
-        return allSuccess;
+        return affected;
     }
 
     @Override
-    protected boolean doDeleteBatch(Collection<? extends Serializable> idList) {
+    protected int doDeleteBatch(Collection<? extends Serializable> idList) {
         if (idList == null || idList.isEmpty()) {
-            return false;
+            return 0;
         }
-        return baseMapper.deleteByIds(idList) > 0;
+        return baseMapper.deleteByIds(idList);
     }
 
     @Override
-    protected boolean doSaveOrUpdateBatch(Collection<T> entityList) {
+    protected int doSaveOrUpdateBatch(Collection<T> entityList) {
         if (entityList == null || entityList.isEmpty()) {
-            return false;
+            return 0;
         }
-        boolean allSuccess = true;
+        int affected = 0;
         for (T entity : entityList) {
-            allSuccess &= doSaveOrUpdate(entity);
+            affected += doSaveOrUpdate(entity) ? 1 : 0;
         }
-        return allSuccess;
+        return affected;
     }
 }

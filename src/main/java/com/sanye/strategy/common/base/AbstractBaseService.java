@@ -58,16 +58,18 @@ public abstract class AbstractBaseService<T> implements IService<T> {
     @Override
     public boolean insertBatch(Collection<T> entityList) {
         beforeInsertBatch(entityList);
-        boolean result = doInTransaction(() -> doInsertBatch(entityList));
+        int affected = doInTransaction(() -> doInsertBatch(entityList));
         afterInsertBatch(entityList);
+        boolean result = affected > 0 && affected == size(entityList);
         return result;
     }
 
     @Override
     public boolean saveOrUpdateBatch(Collection<T> entityList) {
         beforeSaveOrUpdateBatch(entityList);
-        boolean result = doInTransaction(() -> doSaveOrUpdateBatch(entityList));
+        int affected = doInTransaction(() -> doSaveOrUpdateBatch(entityList));
         afterSaveOrUpdateBatch(entityList);
+        boolean result = affected > 0 && affected == size(entityList);
         return result;
     }
 
@@ -84,8 +86,9 @@ public abstract class AbstractBaseService<T> implements IService<T> {
     @Override
     public boolean updateBatch(Collection<T> entityList) {
         beforeUpdateBatch(entityList);
-        boolean result = doInTransaction(() -> doUpdateBatch(entityList));
+        int affected = doInTransaction(() -> doUpdateBatch(entityList));
         afterUpdateBatch(entityList);
+        boolean result = affected > 0 && affected == size(entityList);
         return result;
     }
 
@@ -102,8 +105,9 @@ public abstract class AbstractBaseService<T> implements IService<T> {
     @Override
     public boolean deleteBatch(Collection<? extends Serializable> idList) {
         beforeDeleteBatch(idList);
-        boolean result = doInTransaction(() -> doDeleteBatch(idList));
+        int affected = doInTransaction(() -> doDeleteBatch(idList));
         afterDeleteBatch(idList);
+        boolean result = affected > 0 && affected == size(idList);
         return result;
     }
 
@@ -161,13 +165,25 @@ public abstract class AbstractBaseService<T> implements IService<T> {
 
     protected abstract boolean doSaveOrUpdate(T entity);
 
-    protected abstract boolean doInsertBatch(Collection<T> entityList);
+    /**
+     * 批量新增，返回实际新增行数
+     */
+    protected abstract int doInsertBatch(Collection<T> entityList);
 
-    protected abstract boolean doUpdateBatch(Collection<T> entityList);
+    /**
+     * 批量更新，返回实际受影响行数
+     */
+    protected abstract int doUpdateBatch(Collection<T> entityList);
 
-    protected abstract boolean doDeleteBatch(Collection<? extends Serializable> idList);
+    /**
+     * 批量删除，返回实际受影响行数
+     */
+    protected abstract int doDeleteBatch(Collection<? extends Serializable> idList);
 
-    protected abstract boolean doSaveOrUpdateBatch(Collection<T> entityList);
+    /**
+     * 批量新增或更新，返回实际受影响行数
+     */
+    protected abstract int doSaveOrUpdateBatch(Collection<T> entityList);
 
     // ==================== 事务钩子（默认无事务，桥接层可覆写） ====================
 
@@ -187,6 +203,12 @@ public abstract class AbstractBaseService<T> implements IService<T> {
         return action.get();
     }
 
+    // ==================== 内部工具 ====================
+
+    private static int size(Collection<?> c) {
+        return c == null ? 0 : c.size();
+    }
+
     // ==================== 钩子方法（子类可选覆盖） ====================
 
     /**
@@ -196,7 +218,7 @@ public abstract class AbstractBaseService<T> implements IService<T> {
     }
 
     /**
-     * 新增后钩子，子类可覆盖以实现日志记录、事件发布等
+     * 新增后钩子，子类可覆盖以实现事件发布等
      */
     protected void afterInsert(T entity) {
     }
@@ -208,7 +230,7 @@ public abstract class AbstractBaseService<T> implements IService<T> {
     }
 
     /**
-     * 更新后钩子，子类可覆盖以实现日志记录、事件发布等
+     * 更新后钩子，子类可覆盖以实现事件发布等
      */
     protected void afterUpdate(T entity) {
     }
@@ -220,7 +242,7 @@ public abstract class AbstractBaseService<T> implements IService<T> {
     }
 
     /**
-     * 批量新增后钩子，子类可覆盖以实现日志记录、事件发布等
+     * 批量新增后钩子，子类可覆盖以实现事件发布等
      */
     protected void afterInsertBatch(Collection<T> entityList) {
     }
@@ -232,7 +254,7 @@ public abstract class AbstractBaseService<T> implements IService<T> {
     }
 
     /**
-     * 批量更新后钩子，子类可覆盖以实现日志记录、事件发布等
+     * 批量更新后钩子，子类可覆盖以实现事件发布等
      */
     protected void afterUpdateBatch(Collection<T> entityList) {
     }
@@ -244,7 +266,7 @@ public abstract class AbstractBaseService<T> implements IService<T> {
     }
 
     /**
-     * 删除后钩子，子类可覆盖以实现日志记录、事件发布等
+     * 删除后钩子，子类可覆盖以实现事件发布等
      */
     protected void afterDelete(Serializable id) {
     }
@@ -256,7 +278,7 @@ public abstract class AbstractBaseService<T> implements IService<T> {
     }
 
     /**
-     * 批量删除后钩子，子类可覆盖以实现日志记录、事件发布等
+     * 批量删除后钩子，子类可覆盖以实现事件发布等
      */
     protected void afterDeleteBatch(Collection<? extends Serializable> idList) {
     }
@@ -268,7 +290,7 @@ public abstract class AbstractBaseService<T> implements IService<T> {
     }
 
     /**
-     * 新增或更新后钩子，子类可覆盖以实现日志记录、事件发布等
+     * 新增或更新后钩子，子类可覆盖以实现事件发布等
      */
     protected void afterSaveOrUpdate(T entity) {
     }
@@ -280,7 +302,7 @@ public abstract class AbstractBaseService<T> implements IService<T> {
     }
 
     /**
-     * 批量新增或更新后钩子，子类可覆盖以实现日志记录、事件发布等
+     * 批量新增或更新后钩子，子类可覆盖以实现事件发布等
      */
     protected void afterSaveOrUpdateBatch(Collection<T> entityList) {
     }

@@ -61,6 +61,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=test
 - Java 21，Spring Boot 4.1.0，Maven
 - MyBatis-Plus 3.5.15（`com.baomidou:mybatis-plus-spring-boot4-starter`）— ORM，支持代码生成。**须用 boot4-starter 匹配 Spring Boot 4**：boot3-starter 的自动装配在 Boot 4 下 `@ConditionalOnSingleCandidate(DataSource)` 评估过早，SqlSessionFactory 不创建
 - MySQL，通过 `mysql-connector-j`
+- Redis（spring-data-redis + Lettuce）— 仅承载两类瞬态认证数据：accessToken jti 吊销黑名单（秒级冻结）+ MFA 挑战凭证 tempToken（5min TTL、GETDEL 单次消费），不承载会话/业务缓存
 - Lombok（maven-compiler-plugin 中配置了注解处理器）
 - Spring Boot Actuator，用于健康检查/监控端点
 
@@ -162,10 +163,10 @@ protected abstract boolean doInsert(T entity);
 protected abstract boolean doUpdateById(T entity);
 protected abstract boolean doDeleteById(Serializable id);
 protected abstract boolean doSaveOrUpdate(T entity);
-protected abstract boolean doInsertBatch(Collection<T> entityList);
-protected abstract boolean doUpdateBatch(Collection<T> entityList);
-protected abstract boolean doDeleteBatch(Collection<? extends Serializable> idList);
-protected abstract boolean doSaveOrUpdateBatch(Collection<T> entityList);
+protected abstract int doInsertBatch(Collection<T> entityList);                 // 返回实际新增行数
+protected abstract int doUpdateBatch(Collection<T> entityList);                 // 返回实际受影响行数
+protected abstract int doDeleteBatch(Collection<? extends Serializable> idList); // 返回实际受影响行数
+protected abstract int doSaveOrUpdateBatch(Collection<T> entityList);            // 返回实际受影响行数
 
 // 事务钩子（纯 POJO 声明，默认透传无事务；桥接层覆写为具体事务实现）
 protected <R> R doInTransaction(Supplier<R> action) { return action.get(); }
@@ -185,9 +186,12 @@ protected void beforeSaveOrUpdateBatch(Collection<T> list) {}  protected void af
 
 - `AbstractBaseService<T>` 纯 POJO，零框架依赖（不依赖 MyBatis-Plus，也不依赖 Spring）
 - 批量入口（insertBatch/updateBatch/deleteBatch/saveOrUpdateBatch）经 `doInTransaction()` 钩子执行，默认透传（无事务）
-- `MpBaseServiceImpl` 覆写 `doInTransaction`，用 Spring `TransactionTemplate` 编程式事务实现，任一操作失败整体回滚
+- `MpBaseServiceImpl` 覆写 `doInTransaction`，用注入的共享 `TransactionTemplate` 编程式事务实现，任一操作失败整体回滚
+- 共享 `TransactionTemplate` Bean 定义于 `common/config/TransactionConfig`（基于 `PlatformTransactionManager`）；门面聚合 Service 非 `AbstractBaseService` 子类、够不到 `doInTransaction` 钩子，跨表事务经注入该 Bean 编排（注册/登录等），事务 Bean 单一收口
 - 替换事务实现（JTA/Atomikos/Seata）只换 `PlatformTransactionManager` Bean 或覆写钩子；禁用则保持基类默认透传
 - 单元测试可直接实例化子类覆写钩子装假事务，无需启动 Spring
+
+**日志（暂移除）：** 模板方法操作汇总日志（原 `@Slf4j` `log.info` 8 条）暂整体移除——钩子抛错会丢日志、且与操作/审计职责重叠。后续统一设计「操作/审计日志」（实体 + 字段前后值 + 业务结果）与「请求/WEB 日志」（全局异常已带请求方法/URI）两套方案，见「已知缺陷与待办」。`AbstractBaseService` 现保持纯 POJO 零日志依赖。
 
 #### MpBaseServiceImpl<P extends SimpleBasePO, M extends BaseMapper<P>, T extends SimpleBaseEntity>
 
@@ -340,7 +344,8 @@ com.sanye.strategy
 │   ├── response/     — R<T> 统一响应包装、ResultCode 状态码枚举
 │   ├── annotation/   — 自定义注解（待实现）
 │   ├── config/       — Spring 配置（MybatisPlusConfig：分页拦截器 + MetaObjectHandler；
-│   │                   DeleteFlagEnumTypeHandler：IPersistEnum 枚举持久化适配）
+│   │                   DeleteFlagEnumTypeHandler：IPersistEnum 枚举持久化适配；
+│   │                   TransactionConfig：共享 TransactionTemplate Bean（门面跨表事务 + 桥接层批量））
 │   ├── constant/     — 常量（待实现）
 │   ├── exception/    — BizException（业务异常）、GlobalExceptionHandler（全局异常处理）
 │   ├── interceptor/  — 拦截器（待实现）
@@ -385,11 +390,13 @@ common 层 DIP 初版经代码审查发现若干缺陷，详见 `docs/code-revie
 | ✅ 已修复 | 比较/模糊操作符传 null → `= NULL` 永不匹配 | `DefaultQueryWrapper` | null 视为未提供，条件跳过（等价 MP `eq(boolean,...)` 空值防护） |
 | 🟠 | 逻辑删除 + 唯一键 → 标识永久占用 | `sql/user.sql` | 删号后无法重注册用户名/手机号 |
 | 🟠 | `ums_user_profile.ext_info` JSON 列无类型处理器 | `UmsUserProfilePO` | 暂以 String 存取（JSON 文本）；MP 的 `JacksonTypeHandler` 基于 Jackson 2（`com.fasterxml.jackson.*`），Spring Boot 4 默认 Jackson 3（`tools.jackson.*`），命名空间不兼容，序列化策略待定 |
+| 🟠 暂缓 | 操作/审计日志（操作汇总 + 字段前后值 + 业务结果）+ 请求/WEB 日志统一设计 | `AbstractBaseService` + `MpBaseServiceImpl` + `GlobalExceptionHandler` | 现状：模板方法操作汇总日志已暂移除（见服务层「日志」）；字段级前后值需旧值，旧值仅桥接层可得。已评估字段级方案：A 模板快照钩子 `doGetOldSnapshot`（推荐，单行 diff）、B 桥接层 + `OperationLogger` 组件（可换审计表）、C AOP `@Audited`（违背 DIP 耦合收口，否决）。diff 语义：只报 new 非 null 且与 old 不同字段（兼容部分更新）。批量粒度与请求/WEB 日志方案待定 |
 
 **新增代码注意事项：**
 - `saveOrUpdate` 已修复（沿继承链取主键）；批量方法经 `doInTransaction` 事务钩子执行并聚合逐行结果，事务收口于 `MpBaseServiceImpl`，`AbstractBaseService` 保持纯 POJO。
 - 复杂查询（OR/嵌套/select 投影）走 `IWrapper` 有效：`or()`/`nested(consumer)`/`and`/`apply`/`exists`/`notExists`/`select`/`last` 均已实现并映射到 MP。`or()` 无参数版本仅支持单层 OR 拼接，OR 组用 `nested(sub -> sub.eq(...).or().eq(...))`。
 - 设计模式类新增时必须补齐「角色说明 + 优缺点分析 + UML」三件套（CLAUDE.md 核心约束 2）。
+- 操作汇总日志已暂移除，操作/审计日志 + 请求/WEB 日志统一设计待方案确认（字段级 diff 推荐方向：模板快照钩子 `doGetOldSnapshot` + 纯 POJO `DiffUtils`），见待办表。
 
 ## 代码生成
 

@@ -83,12 +83,14 @@ CREATE TABLE if not exists `ums_user_login_device`
   `login_time`   DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '登录时间',
   `expire_time`  DATETIME                  DEFAULT NULL COMMENT 'Token过期时间',
   `is_current`   TINYINT UNSIGNED          DEFAULT 1 COMMENT '是否当前有效设备',
+  `refresh_token_hash` CHAR(64)                    DEFAULT NULL COMMENT 'refreshToken SHA-256 哈希（Hex，非明文）',
   `deleted`      TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '删除标识',
   `create_time`  DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time`  DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `idx_user_id` (`user_id`),
-  KEY `idx_device_id` (`device_id`)
+  KEY `idx_device_id` (`device_id`),
+  KEY `idx_refresh_token_hash` (`refresh_token_hash`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='用户登录设备表';
 

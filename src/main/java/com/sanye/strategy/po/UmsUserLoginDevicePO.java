@@ -78,4 +78,9 @@ public class UmsUserLoginDevicePO extends SimpleBasePO {
      * 是否当前有效设备 {@link YesNoEnum}
      */
     private YesNoEnum isCurrent;
+
+    /**
+     * 刷新令牌 SHA-256 哈希（Hex，非明文）
+     */
+    private String refreshTokenHash;
 }

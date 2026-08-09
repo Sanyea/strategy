@@ -62,6 +62,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=test
 - MyBatis-Plus 3.5.15（`com.baomidou:mybatis-plus-spring-boot4-starter`）— ORM，支持代码生成。**须用 boot4-starter 匹配 Spring Boot 4**：boot3-starter 的自动装配在 Boot 4 下 `@ConditionalOnSingleCandidate(DataSource)` 评估过早，SqlSessionFactory 不创建
 - MySQL，通过 `mysql-connector-j`
 - Redis（spring-data-redis + Lettuce）— 仅承载两类瞬态认证数据：accessToken jti 吊销黑名单（秒级冻结）+ MFA 挑战凭证 tempToken（5min TTL、GETDEL 单次消费），不承载会话/业务缓存
+- JWT（jjwt 0.12.6）— accessToken HS256 对称签名（签发与验签均显式钉死 `Jwts.SIG.HS256`，不随密钥长度推断），密钥 ≥32 字节从 `jwt.secret` 注入（`application.yaml`，生产经 `JWT_SECRET` 环境变量覆盖，不入库不进代码），TTL 30min；`jti` claim 为 String（RFC 7519，jjwt 拒绝数值型 jti），`String.valueOf(jti)` 落串、消费方 `Long.valueOf(claims.get("jti", String.class))` 还原会话行 id
 - Lombok（maven-compiler-plugin 中配置了注解处理器）
 - Spring Boot Actuator，用于健康检查/监控端点
 
@@ -199,6 +200,7 @@ protected void beforeSaveOrUpdateBatch(Collection<T> list) {}  protected void af
 - 通过 `@Autowired` 注入 `M baseMapper`（Mapper 操作 PO）
 - 抽象钩子 `toPO(T)` / `toEntity(P)`：实体↔PO 转换，子类实现（通常用 `BeanCopyUtils`）
 - 实现所有 `doXXX` 方法：先转 PO，再委托给 MyBatis-Plus `BaseMapper` 方法，结果转回实体
+- **插入主键回填**：`doInsert`/`doSaveOrUpdate`（新增分支）/`doInsertBatch` 经私有 `insertEntityWithBackfill` 委托，插入成功后把 MP 在 PO 上生成的雪花主键回填到实体（`entity.setId(po.getId())`）——否则业务侧 `entity.getId()` 为 null（注册经 initSecurity/initProfile/createSession 引用 user.id 触发 NOT NULL 违例，冒烟发现）
 - 核心转换：`IWrapper<T>` → `QueryWrapper<P>`（遍历条件列表，switch 操作符映射）
 - 分页转换：`IBasePage<T>` → `Page<P>`（传入），`IPage<P>` → `IBasePage<T>`（回填 + convert）
 
@@ -276,17 +278,19 @@ public class R<T> {
     static <T> R<T> ok();                          // 成功（无数据）
     static <T> R<T> fail(ResultCode resultCode);            // 失败（枚举默认提示语）
     static <T> R<T> fail(ResultCode resultCode, String message);  // 失败（自定义提示语）
+    static <T> R<T> fail(ResultCode resultCode, String message, T data);  // 失败（自定义提示语 + 数据载荷，如 MFA 挑战凭证）
 }
 ```
 
 - 状态码枚举 `ResultCode`（`common.response`）：HTTP 语义对齐，分 2xx 成功 / 4xx 客户端错误 / 5xx 服务端错误三段，含 `isSuccess()`/`isClientError()`/`isServerError()` 分类谓词与 `of(int)` 查找。新增业务码在此扩展，禁止业务层散落魔法数字。
+- 批1 新增 7 码（HTTP 归属）：`TOKEN_EXPIRED(401)`、`DEVICE_KICKED(401)`（本批仅注册状态码，批4 踢设备流程使用）、`MFA_CHALLENGE_EXPIRED(401)`、`ACCOUNT_LOCKED(403)`、`ACCOUNT_DISABLED(403)`、`MFA_REQUIRED(403)`、`ACCOUNT_DELETED(410)`。
 - `timestamp` 使用 `java.time.Instant.now().toString()` 生成 ISO-8601 标准时间字符串（如 `2026-08-03T10:30:00.123Z`），不走毫秒时间戳。
 
 #### 异常体系
 
 | 类 | 职责 |
 |----|------|
-| `BizException`（`common/exception`） | 业务可控错误信号，携带 `ResultCode`，业务层抛出不需逐层声明 |
+| `BizException`（`common/exception`） | 业务可控错误信号，携带 `ResultCode` + 可选 `Object payload`（`MFA_REQUIRED` 走此通道携带 `MfaChallengeVO`；payload 为 null 行为与现状一致），业务层抛出不需逐层声明 |
 | `GlobalExceptionHandler`（`@RestControllerAdvice`） | 全局收敛：异常 → `R<T>` + 对应 HTTP 状态码，日志带请求方法/URI |
 
 映射约定：
@@ -317,16 +321,40 @@ public class R<T> {
 
 **实体基类层枚举（约定式解耦）：** 仅 `DeleteFlagEnum`（`common.base`，`SimpleBaseEntity`/`SimpleBasePO` 的 `deleted` 字段）走约定式彻底解耦——枚举只实现纯接口 `IPersistEnum<T>`（`getPersistValue()` 返回映射码，零框架依赖），**不使用** `@EnumValue`。持久化适配由 `common/config/DeleteFlagEnumTypeHandler` 承担：写库取 `getPersistValue()`，读库经 `DeleteFlagEnum.valueOf(code)` 还原；通过 `mybatis-plus.type-handlers-package` 扫描 + `@MappedTypes` 注册，PO 层字段声明与上层业务代码完全不动。新增实体基类层枚举时沿用此约定（实现 `IPersistEnum` + 补一个 TypeHandler）。
 
-**自动填充：** `MetaObjectHandler` 已注册（`MybatisPlusConfig`），插入/更新时填充 PO 的 `createTime`/`updateTime`；`createUserId`/`updateUserId` 待用户上下文（Spring Security/拦截器）接入后补充，当前写入 NULL。
+**自动填充：** `MetaObjectHandler` 已注册（`MybatisPlusConfig`），插入时填充 PO 的 `createTime`/`updateTime` 与 `deleted`（`DeleteFlagEnum.NOT_DELETED`，对应 PO 的 `@TableField(fill = INSERT)` 约定，不填则插入显式 NULL 触发 NOT NULL 违例——冒烟发现）；批1 起 `createUserId`/`updateUserId` 从 `UserContext` 填充（`TokenAuthInterceptor` 认证通过后已填充用户上下文），无上下文（定时任务/初始化脚本）落 NULL 不阻断。`updateTime` 更新时填充，`updateUserId` 有上下文时填充。
 
 **判断规则：** 系统级表（登录设备、认证绑定、安全日志）继承 `SimpleBaseEntity`。有人工操作、需要追溯操作人的业务表继承 `BaseEntity`。对应 PO 同理选 `SimpleBasePO` / `BasePO`。
 
 `deleted` 字段使用 `DeleteFlagEnum`（`NOT_DELETED=0`，`DELETED=1`），实现 `IPersistEnum<Integer>` 约定式映射，持久化由 `DeleteFlagEnumTypeHandler` 桥接（见上文）。MyBatis-Plus 的 `@TableLogic` 自动过滤已删除行。
 
+### 认证体系（auth 能力包，批1 已落地）
+
+认证零 Spring Security：accessToken 无状态 JWT HS256（30min，claims 恒含 `type=ACCESS, userId, userType, jti, deviceId, exp`；`jti` 为 String——RFC 7519 规定 jti 为 case-sensitive 字符串、jjwt 0.12.6 拒绝数值型，`JwtUtil` 签发 `String.valueOf(jti)`、拦截器 `Long.valueOf(claims.get("jti", String.class))` 还原会话行 id）；refreshToken 32B 不透明串，仅存 SHA-256 哈希于 `ums_user_login_device.refresh_token_hash`（14 天，轮换防重放）。跨表写（注册/登录成功段）经共享 `TransactionTemplate`（`TransactionConfig`）编排。
+
+**防枚举范围（已知局限，批2 缓解）：** 登录「用户不存在」与「密码错误」统一 401「账号或密码错误」——该掩码仅覆盖 缺失用户 vs 密码错误 二分；已存在账号的状态分支（403 冻结/锁定、410 注销）仍会泄露账号存在性。防批量枚举的全局登录限流在批2 落地，批1 不改变该行为。
+
+**认证管道（TokenAuthInterceptor + WebMvcConfig）：** Spring MVC `HandlerInterceptor`（责任链），`WebMvcConfig` 注册（`/**` 排除白名单）。流程：白名单放行 → `Authorization: Bearer <accessToken>` 解析 → 验签（签发与验签均显式钉死 HS256，解析器注册表收敛单元素，HS384/HS512/RS/ES/PS/EdDSA/none 一律拒）→ `type=ACCESS` 强校验 → Redis `EXISTS jti:{jti}` 黑名单命中即拒（401 `TOKEN_EXPIRED`）→ 填充 `UserContext`（userId/userType/jti/deviceId，ThreadLocal）→ `afterCompletion` 清除。白名单：`/auth/login, /auth/register, /auth/refresh, /auth/mfa/verify, /actuator/**, /error`。拦截器零 DB 查询（不逐请求查 userStatus——冻结/注销在签发时把关，即时吊销走黑名单）。
+
+**Redis 双用途（瞬态认证数据，`common/auth`，均自动装配 `StringRedisTemplate`、Lettuce，不建独立 RedisConfig）：**
+- `JtiBlacklistService`（键域 `jti:*`）：登出/踢设备/改密/冻结/注销写 `SETEX jti:{jti} ttl`，秒级冻结 accessToken。
+- `ChallengeTokenService`（键域 `mfa:*`）：登录 mfa=1 分支签发 32B tempToken，`SETEX mfa:{tempToken} {userId}:{deviceId} 300`（5min TTL，绑定账号+设备）；verify 时 `GETDEL` 原子单次消费（`ValueOperations.getAndDelete`），防重放/双消费竞态。
+- 不承载会话/业务缓存（refresh 会话仍落库）。
+
+**MFA 二次验证（挑战凭证反转）：** 登录步骤 5 密码校验对 + `mfa_status=1` → 签发 5min 挑战凭证随 403 `MFA_REQUIRED`（`BizException` payload 携带 `MfaChallengeVO{tempToken, expiresIn}`）返回，**DB 零写入**（不清计数/不建会话/不签 token）；`POST /auth/mfa/verify {tempToken, code, deviceInfo}` 不再验密码（密码因子已在登录步骤 5 校验，tempToken 即通过证明），verify 仅验 OTP——`GETDEL` 原子单次消费（不存在/已消费/过期 → 401 `MFA_CHALLENGE_EXPIRED`），OTP 错 = 挑战已消费（重试须重新登录），deviceId 与挑战绑定比对（防跨设备复用）。
+
+**DTO/VO（`auth/dto`）：** `MfaVerifyDTO` = `{tempToken, code, deviceInfo}`（无 account/password，userId 由挑战绑定解出）；`MfaChallengeVO` = `{tempToken, expiresIn}`（仅随 403 MFA_REQUIRED 返回一次）。
+
 ### 包结构
 
 ```
 com.sanye.strategy
+├── auth/                      # 能力包：认证（批1 已落地）
+│   ├── controller/AuthController
+│   ├── service/AuthService            （门面：注册/登录/刷新/登出/MFA 挑战凭证验证）
+│   └── dto/    RegisterDTO / LoginDTO / RefreshDTO / MfaVerifyDTO / TokenVO / MfaChallengeVO
+├── device/                    # 能力包：设备管理（批1 会话行属主核心，批4 补设备管理端点）
+│   ├── service/DeviceService          （门面：ums_user_login_device 会话行属主，认证与设备管理共用）
+│   └── dto/    DeviceInfo
 ├── domain/           — 实体类（纯 POJO，继承 SimpleBaseEntity/BaseEntity），每表一个
 ├── enums/            — 业务枚举类（@EnumValue 类型安全映射，实体与 PO 共用同一套枚举）
 ├── po/               — PO 类（继承 SimpleBasePO/BasePO，@TableName + MP 映射注解），Mapper 操作对象
@@ -335,6 +363,8 @@ com.sanye.strategy
 │   └── impl/         — 业务 Service 实现（继承 MpBaseServiceImpl<P, M, T>）
 ├── controller/       — Controller，继承 BaseController<T, S, Q, V>
 ├── common/
+│   ├── auth/         — JwtUtil / UserContext / PasswordEncoder（@Component Bean）/ TotpUtil（@Component Bean）/
+│   │                   JtiBlacklistService（键域 jti:*）/ ChallengeTokenService（键域 mfa:*，GETDEL 原子单次消费）
 │   ├── base/         — IBaseService<T>、IService<T>、AbstractBaseService<T>
 │   │                   MpBaseServiceImpl<P,M,T>、IWrapper<T>、AbstractWrapper<T>
 │   │                   DefaultQueryWrapper<T>、IQueryCondition、相关条件子类型
@@ -343,13 +373,15 @@ com.sanye.strategy
 │   ├── model/        — IBasePage<T>、BasePage<T>、BasePageDTO<T>、DTO 类
 │   ├── response/     — R<T> 统一响应包装、ResultCode 状态码枚举
 │   ├── annotation/   — 自定义注解（待实现）
-│   ├── config/       — Spring 配置（MybatisPlusConfig：分页拦截器 + MetaObjectHandler；
+│   ├── config/       — Spring 配置（MybatisPlusConfig：分页拦截器 + MetaObjectHandler 审计人填充；
 │   │                   DeleteFlagEnumTypeHandler：IPersistEnum 枚举持久化适配；
-│   │                   TransactionConfig：共享 TransactionTemplate Bean（门面跨表事务 + 桥接层批量））
+│   │                   TransactionConfig：共享 TransactionTemplate Bean（门面跨表事务 + 桥接层批量）；
+│   │                   WebMvcConfig：注册 TokenAuthInterceptor + 白名单）
 │   ├── constant/     — 常量（待实现）
-│   ├── exception/    — BizException（业务异常）、GlobalExceptionHandler（全局异常处理）
-│   ├── interceptor/  — 拦截器（待实现）
-│   └── util/         — 工具类（BeanCopyUtils 实体↔PO 转换）
+│   ├── exception/    — BizException（业务异常，携带 ResultCode + 可选 Object payload）、
+│   │                   GlobalExceptionHandler（全局异常处理，payload 非空透传 data）
+│   ├── interceptor/  — TokenAuthInterceptor（认证管道拦截器，批1 已实现）
+│   └── util/         — 工具类（BeanCopyUtils 实体↔PO 转换、HashUtil、IpUtils）
 └── StrategyApplication.java — Spring Boot 入口
 ```
 
@@ -383,7 +415,7 @@ common 层 DIP 初版经代码审查发现若干缺陷，详见 `docs/code-revie
 | ✅ 已修复 | 批量方法无事务、忽略逐行结果、恒返 true | `doInTransaction` 钩子 + `doInsertBatch` 等 | 事务钩子集中定义，桥接层以 TransactionTemplate 实现，逐行结果聚合 |
 | ✅ 已修复 | 分页未注册拦截器 + pom 缺 `mybatis-plus-jsqlparser` | `common/config/MybatisPlusConfig` | 注册分页拦截器，`page()` 正常 |
 | ✅ 已修复 | `or/and/nested/apply/exists/select/last` 静默空实现 | `AbstractWrapper` + `toMpWrapper` | 复杂操作符全部实现并映射；`or()` 采用待挂载标记（前后缀自动消除），空嵌套组/空投影/空 SQL/缺参占位符构建期 fail-fast，`select()` 支持列投影排除敏感列 |
-| 🟠 | `createUserId`/`updateUserId` 无用户上下文可填 | `MybatisPlusConfig` | 已注册 MetaObjectHandler 填时间字段；审计人字段待安全上下文接入 |
+| ✅ 已修复 | `createUserId`/`updateUserId` 无用户上下文可填 | `MybatisPlusConfig` + `common/auth/UserContext` | 批1 `TokenAuthInterceptor` 填充 `UserContext`，`MetaObjectHandler` 从上下文取值；无上下文（定时任务/初始化脚本）落 NULL 不阻断 |
 | ✅ 已修复 | `getOne` 多行抛 `TooManyResultsException` | `doGetOne` | 自动追加 `LIMIT 1`（调用方显式 `last()` 时不追加），多行返回第一行 |
 | ✅ 已修复 | `orderBy` 空列崩溃 | `toMpWrapper` | 空列跳过，与 orderByAsc/Desc 一致 |
 | ✅ 已修复 | `in()` 传 List 变单参绑定 | `DefaultQueryWrapper.in` | 单 `Collection` 参数构建期展平为数组 |
@@ -391,6 +423,7 @@ common 层 DIP 初版经代码审查发现若干缺陷，详见 `docs/code-revie
 | 🟠 | 逻辑删除 + 唯一键 → 标识永久占用 | `sql/user.sql` | 删号后无法重注册用户名/手机号 |
 | 🟠 | `ums_user_profile.ext_info` JSON 列无类型处理器 | `UmsUserProfilePO` | 暂以 String 存取（JSON 文本）；MP 的 `JacksonTypeHandler` 基于 Jackson 2（`com.fasterxml.jackson.*`），Spring Boot 4 默认 Jackson 3（`tools.jackson.*`），命名空间不兼容，序列化策略待定 |
 | 🟠 暂缓 | 操作/审计日志（操作汇总 + 字段前后值 + 业务结果）+ 请求/WEB 日志统一设计 | `AbstractBaseService` + `MpBaseServiceImpl` + `GlobalExceptionHandler` | 现状：模板方法操作汇总日志已暂移除（见服务层「日志」）；字段级前后值需旧值，旧值仅桥接层可得。已评估字段级方案：A 模板快照钩子 `doGetOldSnapshot`（推荐，单行 diff）、B 桥接层 + `OperationLogger` 组件（可换审计表）、C AOP `@Audited`（违背 DIP 耦合收口，否决）。diff 语义：只报 new 非 null 且与 old 不同字段（兼容部分更新）。批量粒度与请求/WEB 日志方案待定 |
+| ✅ 已落地 | 认证主链批1（注册/登录/刷新/登出/MFA 挑战凭证验证 + jti 黑名单） | auth + device 能力包 + common/auth + common/interceptor | 双 Token（JWT HS256 显式钉死 + 不透明 refresh 哈希）、TokenAuthInterceptor 白名单/责任链、Redis 双用途（`jti:*` + `mfa:*`）、`R.fail` data 重载 + `BizException` payload 通道、审计人填充（缺陷 5 已修复）。批2-6 状态不变 |
 
 **新增代码注意事项：**
 - `saveOrUpdate` 已修复（沿继承链取主键）；批量方法经 `doInTransaction` 事务钩子执行并聚合逐行结果，事务收口于 `MpBaseServiceImpl`，`AbstractBaseService` 保持纯 POJO。

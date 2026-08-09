@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
+import com.sanye.strategy.common.auth.UserContext;
+import com.sanye.strategy.common.base.DeleteFlagEnum;
 import org.apache.ibatis.reflection.MetaObject;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.context.annotation.Bean;
@@ -28,8 +30,8 @@ import java.time.LocalDateTime;
  * 设计说明：
  * <ul>
  *   <li>角色：框架装配层，只声明 Bean，不承载业务。</li>
- *   <li>优缺点：注册即用、解耦；缺点：自动填充仅对 PO 生效（实体为纯 POJO 不参与），
- *       createUserId/updateUserId 需用户上下文（Spring Security/拦截器）接入后补充。</li>
+ *   <li>优缺点：注册即用、解耦；缺点：自动填充仅对 PO 生效（实体为纯 POJO 不参与）。
+ *       createUserId/updateUserId 已由拦截器填充 UserContext，MetaObjectHandler 从上下文取值。</li>
  * </ul>
  * </p>
  *
@@ -55,9 +57,9 @@ public class MybatisPlusConfig {
     }
 
     /**
-     * 自动填充处理器 — 插入/更新时填充时间字段
+     * 自动填充处理器 — 插入/更新时填充时间字段与审计人字段
      * <p>
-     * 当前填充 createTime/updateTime；createUserId/updateUserId 待用户上下文接入后补充。
+     * 当前填充 createTime/updateTime；createUserId/updateUserId 已由拦截器填充 UserContext，MetaObjectHandler 从上下文取值。
      * </p>
      *
      * @return 填充处理器
@@ -69,11 +71,24 @@ public class MybatisPlusConfig {
             public void insertFill(MetaObject metaObject) {
                 this.strictInsertFill(metaObject, "createTime", LocalDateTime.class, LocalDateTime.now());
                 this.strictInsertFill(metaObject, "updateTime", LocalDateTime.class, LocalDateTime.now());
+                // 逻辑删除标识：@TableLogic + @TableField(fill=INSERT) 约定由处理器填默认值（NOT_DELETED=0），
+                // 不填则插入显式 NULL，触发 NOT NULL 约束（冒烟发现）
+                this.strictInsertFill(metaObject, "deleted", DeleteFlagEnum.class, DeleteFlagEnum.NOT_DELETED);
+                // 审计人：有用户上下文（拦截器已填充）则写入，无上下文（定时任务/初始化脚本）落 NULL 不阻断
+                Long userId = UserContext.get() == null ? null : UserContext.get().getUserId();
+                if (userId != null) {
+                    this.strictInsertFill(metaObject, "createUserId", Long.class, userId);
+                    this.strictInsertFill(metaObject, "updateUserId", Long.class, userId);
+                }
             }
 
             @Override
             public void updateFill(MetaObject metaObject) {
                 this.strictUpdateFill(metaObject, "updateTime", LocalDateTime.class, LocalDateTime.now());
+                Long userId = UserContext.get() == null ? null : UserContext.get().getUserId();
+                if (userId != null) {
+                    this.strictUpdateFill(metaObject, "updateUserId", Long.class, userId);
+                }
             }
         };
     }

@@ -28,14 +28,16 @@ public class BizException extends RuntimeException {
     /** 状态码 */
     private final ResultCode resultCode;
 
+    /** 可选数据载荷（如 MFA 挑战凭证），无则 null */
+    private final Object payload;
+
     /**
      * 业务异常（使用状态码默认提示语）
      *
      * @param resultCode 状态码
      */
     public BizException(ResultCode resultCode) {
-        super(resultCode.getMessage());
-        this.resultCode = resultCode;
+        this(resultCode, resultCode.getMessage(), null);
     }
 
     /**
@@ -45,11 +47,27 @@ public class BizException extends RuntimeException {
      * @param message    自定义提示信息
      */
     public BizException(ResultCode resultCode, String message) {
+        this(resultCode, message, null);
+    }
+
+    /**
+     * 业务异常（自定义提示语 + 可选数据载荷）
+     *
+     * @param resultCode 状态码
+     * @param message    自定义提示信息
+     * @param payload    可选数据载荷（如 MFA 挑战凭证），无则 null
+     */
+    public BizException(ResultCode resultCode, String message, Object payload) {
         super(message);
         this.resultCode = resultCode;
+        this.payload = payload;
     }
 
     public ResultCode getResultCode() {
         return resultCode;
+    }
+
+    public Object getPayload() {
+        return payload;
     }
 }

@@ -60,7 +60,7 @@ public class GlobalExceptionHandler {
      * 业务异常
      */
     @ExceptionHandler(BizException.class)
-    public ResponseEntity<R<Void>> handleBizException(HttpServletRequest request, BizException e) {
+    public ResponseEntity<R<Object>> handleBizException(HttpServletRequest request, BizException e) {
         ResultCode resultCode = e.getResultCode();
         String message = e.getMessage();
         if (resultCode == null) {
@@ -69,6 +69,10 @@ public class GlobalExceptionHandler {
             return response(ResultCode.INTERNAL_ERROR, ResultCode.INTERNAL_ERROR.getMessage());
         }
         log.warn("业务异常 {}: code={}, message={}", requestLine(request), resultCode.getCode(), message);
+        if (e.getPayload() != null) {
+            HttpStatus httpStatus = resolveHttpStatus(resultCode);
+            return ResponseEntity.status(httpStatus).body(R.fail(resultCode, message, e.getPayload()));
+        }
         return response(resultCode, message);
     }
 

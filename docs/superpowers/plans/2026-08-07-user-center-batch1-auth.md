@@ -53,8 +53,7 @@
   ResultCode.java                                    7 个新状态码（含 MFA_CHALLENGE_EXPIRED）
   R.java / BizException.java / GlobalExceptionHandler.java  错误数据通道（R.fail data 重载 + BizException payload 透传）
   MybatisPlusConfig.java                             MetaObjectHandler 审计人填充（UserContext）
-  sql/user.sql                                       列宽放宽 / 默认 NULL / idx_user_current
-  sql/migration/2026-08-07-batch1-auth.sql          存量库一次性迁移（新增）
+  sql/user.sql                                       列宽放宽 / 默认 NULL / idx_user_current（存量迁移脚本已删，dev 库实测已具备结构）
   mapper/UmsUserLoginDeviceMapper.xml               refresh_token_hash 结果映射
   docs/superpowers/specs/2026-08-07-user-center-design.md  4.3 白名单 / 5.2.1 挑战凭证反转 / 8.3 一致性 / Redis 双用途
   CLAUDE.md                                          技术栈 Redis 双用途 / 包结构 / 待办表更新（收尾任务）
@@ -80,7 +79,7 @@
 - Consumes: 无
 - Produces: `jwt.secret` / `jwt.access-token-ttl-minutes` 配置项（Task 6 `JwtUtil` 读取）；`spring.data.redis.*`（Task 8 自动装配 `StringRedisTemplate` 读取）
 
-- [ ] **Step 1: pom.xml 加 5 个依赖**
+- [x] **Step 1: pom.xml 加 5 个依赖**
 
 在 `<dependencies>` 内、`spring-boot-starter-webmvc-test` 之后追加：
 
@@ -113,7 +112,7 @@
 		</dependency>
 ```
 
-- [ ] **Step 2: application.yaml 加 jwt 配置**
+- [x] **Step 2: application.yaml 加 jwt 配置**
 
 `application.yaml` 末尾追加：
 
@@ -124,7 +123,7 @@ jwt:
   access-token-ttl-minutes: 30
 ```
 
-- [ ] **Step 3: application-dev.yaml 加 Redis 配置**
+- [x] **Step 3: application-dev.yaml 加 Redis 配置**
 
 `application-dev.yaml` 的 `spring:` 下、`datasource` 同级追加（host/port 按实际 Redis 调整）：
 
@@ -136,12 +135,12 @@ jwt:
       database: 0
 ```
 
-- [ ] **Step 4: 编译验证依赖可解析**
+- [x] **Step 4: 编译验证依赖可解析**
 
 Run: `mvn compile -q`
 Expected: BUILD SUCCESS。若报 `spring-boot-starter-data-redis` 找不到，说明 Boot 4.1 改名，把依赖坐标改为实际名（如 `spring-boot-starter-data-redis` 是否改为 `spring-boot-starter-redis`）并记录；若 jjwt/jbcrypt 版本号报错，改 `0.12.5`/`0.3` 并记录。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pom.xml src/main/resources/application.yaml src/main/resources/application-dev.yaml
@@ -150,49 +149,19 @@ git commit -m "feat(auth): 批1 依赖与配置 — jjwt/jbcrypt/spring-data-red
 
 ---
 
-### Task 2: DDL — 存量迁移脚本 + user.sql 同步 + login_device XML 映射
+### Task 2: DDL — user.sql 同步 + login_device XML 映射
+
+> 注：原存量迁移脚本 `sql/migration/2026-08-07-batch1-auth.sql` 已删除——dev 库经冒烟实测已具备批1 结构（ums_user 列宽/NULL、login_device 列与索引），新库直接以 `user.sql` 建表。存量升级能力由批2+ 统一迁移方案承接。
 
 **Files:**
-- Create: `sql/migration/2026-08-07-batch1-auth.sql`
 - Modify: `sql/user.sql`
 - Modify: `src/main/resources/mapper/UmsUserLoginDeviceMapper.xml`
 
 **Interfaces:**
 - Consumes: 无
-- Produces: 存量库升级 SQL（Task 14 冒烟测试前置——须先执行迁移再启应用）；`refresh_token_hash`/`idx_user_current` 列与索引（Task 10 `DeviceService` 查询按 `refresh_token_hash`）
+- Produces: `refresh_token_hash`/`idx_user_current` 列与索引（Task 10 `DeviceService` 查询按 `refresh_token_hash`）
 
-- [ ] **Step 1: 新建存量迁移脚本**
-
-创建 `sql/migration/2026-08-07-batch1-auth.sql`：
-
-```sql
--- 批1 认证主链 DDL（存量库一次性升级，可重复执行需人工判断；MySQL 8.0 不支持 ADD COLUMN IF NOT EXISTS）
--- 新库建表以 sql/user.sql 为准，本文件仅升级已存在库。
-
--- 8.1 唯一标识列宽放宽（注销后缀 #del#{id} 最多 24 字符，预留余量；缺陷 10）
-ALTER TABLE ums_user
-  MODIFY username VARCHAR(120) NOT NULL,
-  MODIFY phone    VARCHAR(48)  DEFAULT NULL,
-  MODIFY email    VARCHAR(180) DEFAULT NULL;
-
--- 8.2 空手机/邮箱 NULL 化（缺陷 11）
-ALTER TABLE ums_user
-  MODIFY phone    VARCHAR(48)  DEFAULT NULL,
-  MODIFY email    VARCHAR(180) DEFAULT NULL,
-  MODIFY phone_country_code VARCHAR(12) DEFAULT '+86';
-
--- 存量回填：'' -> NULL（否则旧行仍占 uk_phone/uk_email 唯一键）
-UPDATE ums_user SET phone = NULL WHERE phone = '';
-UPDATE ums_user SET email = NULL WHERE email = '';
-
--- 8.3 会话表 refresh_token_hash + 索引（缺陷 4/7）
-ALTER TABLE ums_user_login_device
-  ADD COLUMN refresh_token_hash CHAR(64) DEFAULT NULL COMMENT 'refreshToken SHA-256 哈希（Hex，非明文）',
-  ADD KEY idx_user_current (user_id, is_current),
-  ADD KEY idx_refresh_token_hash (refresh_token_hash);
-```
-
-- [ ] **Step 2: 同步 user.sql（新库建表）**
+- [x] **Step 1: 同步 user.sql（新库建表）**
 
 `sql/user.sql` 的 `ums_user` 建表内三列宽与默认值改为：
 
@@ -210,7 +179,7 @@ ALTER TABLE ums_user_login_device
   KEY `idx_user_current` (`user_id`, `is_current`),
 ```
 
-- [ ] **Step 3: 补齐 login_device XML 结果映射**
+- [x] **Step 2: 补齐 login_device XML 结果映射**
 
 `src/main/resources/mapper/UmsUserLoginDeviceMapper.xml` 的 `<resultMap>` 在 `isCurrent` 行后加一行：
 
@@ -224,15 +193,10 @@ ALTER TABLE ums_user_login_device
         is_current,refresh_token_hash,deleted,create_time,update_time
 ```
 
-- [ ] **Step 4: 人工执行迁移（本机/测试库）**
-
-Run（在 MySQL 客户端对 `sys_strategy` 库执行 `sql/migration/2026-08-07-batch1-auth.sql`，注意该文件无 `USE` 语句，需先 `use sys_strategy;`）
-Expected: 全部语句成功；重复执行会因 ADD COLUMN 已存在报错（正常，一次性脚本）。
-
-- [ ] **Step 5: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
-git add sql/migration/2026-08-07-batch1-auth.sql sql/user.sql src/main/resources/mapper/UmsUserLoginDeviceMapper.xml
+git add sql/user.sql src/main/resources/mapper/UmsUserLoginDeviceMapper.xml
 git commit -m "feat(auth): 批1 DDL — 列宽放宽/空值NULL化/refresh_token_hash+索引，user.sql 与 login_device XML 同步"
 ```
 
@@ -250,7 +214,7 @@ git commit -m "feat(auth): 批1 DDL — 列宽放宽/空值NULL化/refresh_token
 - Consumes: 无
 - Produces: `ResultCode.TOKEN_EXPIRED / ACCOUNT_LOCKED / ACCOUNT_DISABLED / ACCOUNT_DELETED / DEVICE_KICKED / MFA_REQUIRED / MFA_CHALLENGE_EXPIRED`（Task 11 拦截器、Task 13 AuthService 抛出）；`R.fail(ResultCode, String, T data)` 数据重载 + `BizException(Object payload)` 载荷通道（MFA_REQUIRED 携带 `MfaChallengeVO` 挑战凭证，Task 13 login 使用）
 
-- [ ] **Step 1: 插入新状态码**
+- [x] **Step 1: 插入新状态码**
 
 `ResultCode.java` 中：
 - `UNAUTHORIZED(401, ...)` 行后插入 `TOKEN_EXPIRED`、`DEVICE_KICKED`、`MFA_CHALLENGE_EXPIRED`
@@ -293,7 +257,7 @@ git commit -m "feat(auth): 批1 DDL — 列宽放宽/空值NULL化/refresh_token
     ACCOUNT_DELETED(410, "账号已注销"),
 ```
 
-- [ ] **Step 2: R / BizException / GlobalExceptionHandler 错误数据通道**
+- [x] **Step 2: R / BizException / GlobalExceptionHandler 错误数据通道**
 
 MFA_REQUIRED 需随 403 携带挑战凭证，现异常链路三处无 data 通道。三处改动：
 
@@ -361,12 +325,12 @@ MFA_REQUIRED 需随 403 携带挑战凭证，现异常链路三处无 data 通�
 
 `response()` 辅助方法已是泛型 `private <T> ResponseEntity<R<T>> response(ResultCode, String)`，**无需改动**——handleBizException 改为 `ResponseEntity<R<Object>>` 后，原分支 `return response(resultCode, message)` 经类型推断（T=Object）自动适配；其余 12 个 handler 仍返回 `ResponseEntity<R<Void>>`，泛型不变性下不受影响。**勿**将 `response()` 改成固定 `ResponseEntity<R<Object>>`（会破坏其他 handler）。`getPayload() == null` 时走原 `response()` 路径，行为与现状完全一致（零回归）。
 
-- [ ] **Step 3: 编译验证**
+- [x] **Step 3: 编译验证**
 
 Run: `mvn compile -q`
 Expected: BUILD SUCCESS。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/common/response/ResultCode.java src/main/java/com/sanye/strategy/common/response/R.java src/main/java/com/sanye/strategy/common/exception/BizException.java src/main/java/com/sanye/strategy/common/exception/GlobalExceptionHandler.java
@@ -384,7 +348,7 @@ git commit -m "feat(auth): 批1 ResultCode 7 码 + 错误数据通道 — TOKEN_
 **Interfaces:**
 - Produces: `PasswordEncoder.encode(String):String`、`PasswordEncoder.matches(String, String):boolean`（Task 13 AuthService 注册/登录使用；verifyMfa 不再验密码——挑战凭证反转后密码因子已在登录步骤 5 校验）
 
-- [ ] **Step 1: 写失败单测**
+- [x] **Step 1: 写失败单测**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -427,12 +391,12 @@ class PasswordEncoderTest {
 }
 ```
 
-- [ ] **Step 2: 跑测试验证失败**
+- [x] **Step 2: 跑测试验证失败**
 
 Run: `mvn test -Dtest=PasswordEncoderTest`
 Expected: 编译失败（`PasswordEncoder` 类不存在）。
 
-- [ ] **Step 3: 实现 PasswordEncoder**
+- [x] **Step 3: 实现 PasswordEncoder**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -486,12 +450,12 @@ public class PasswordEncoder {
 }
 ```
 
-- [ ] **Step 4: 跑测试验证通过**
+- [x] **Step 4: 跑测试验证通过**
 
 Run: `mvn test -Dtest=PasswordEncoderTest`
 Expected: 3 个测试全部 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/common/auth/PasswordEncoder.java src/test/java/com/sanye/strategy/common/auth/PasswordEncoderTest.java
@@ -509,7 +473,7 @@ git commit -m "feat(auth): 批1 PasswordEncoder — jbcrypt BCrypt 封装 + 单�
 **Interfaces:**
 - Produces: `UserContext.set/get/clear`、`UserContext(Long, UserTypeEnum, Long, String)`（Task 9 MetaObjectHandler 读取、Task 11 拦截器填充、Task 13 logout 取 jti）
 
-- [ ] **Step 1: 写失败单测**
+- [x] **Step 1: 写失败单测**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -567,12 +531,12 @@ class UserContextTest {
 }
 ```
 
-- [ ] **Step 2: 跑测试验证失败**
+- [x] **Step 2: 跑测试验证失败**
 
 Run: `mvn test -Dtest=UserContextTest`
 Expected: 编译失败（`UserContext` 类不存在）。
 
-- [ ] **Step 3: 实现 UserContext**
+- [x] **Step 3: 实现 UserContext**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -651,12 +615,12 @@ public class UserContext {
 }
 ```
 
-- [ ] **Step 4: 跑测试验证通过**
+- [x] **Step 4: 跑测试验证通过**
 
 Run: `mvn test -Dtest=UserContextTest`
 Expected: 2 个测试全部 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/common/auth/UserContext.java src/test/java/com/sanye/strategy/common/auth/UserContextTest.java
@@ -675,7 +639,7 @@ git commit -m "feat(auth): 批1 UserContext — ThreadLocal 用户上下文 + �
 - Consumes: `jwt.secret` / `jwt.access-token-ttl-minutes`（Task 1）
 - Produces: `JwtUtil.generateAccessToken(Long userId, UserTypeEnum userType, Long jti, String deviceId):String`、`JwtUtil.parseToken(String):Claims`（抛 `io.jsonwebtoken.JwtException`）、`JwtUtil.getAccessTokenTtlSeconds():long`（Task 11 拦截器、Task 13 AuthService 使用）
 
-- [ ] **Step 1: 写失败单测**
+- [x] **Step 1: 写失败单测**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -757,12 +721,12 @@ class JwtUtilTest {
 }
 ```
 
-- [ ] **Step 2: 跑测试验证失败**
+- [x] **Step 2: 跑测试验证失败**
 
 Run: `mvn test -Dtest=JwtUtilTest`
 Expected: 编译失败（`JwtUtil` 类不存在）。
 
-- [ ] **Step 3: 实现 JwtUtil**
+- [x] **Step 3: 实现 JwtUtil**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -865,12 +829,12 @@ public class JwtUtil {
 }
 ```
 
-- [ ] **Step 4: 跑测试验证通过**
+- [x] **Step 4: 跑测试验证通过**
 
 Run: `mvn test -Dtest=JwtUtilTest`
 Expected: 4 个测试全部 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/common/auth/JwtUtil.java src/test/java/com/sanye/strategy/common/auth/JwtUtilTest.java
@@ -888,7 +852,7 @@ git commit -m "feat(auth): 批1 JwtUtil — jjwt HS256 签发/解析 + kid 预�
 **Interfaces:**
 - Produces: `TotpUtil.verify(String base32Secret, String code):boolean`（30s 窗口 ±1，Task 13 `verifyMfa` 对挑战绑定 userId 的 `mfa_secret` 使用）；包私有 `TotpUtil.generateAt(String, long)`（测试向量用，批3 开启 MFA 时在此类补 `generateSecret()`）。**tempToken 生成不属本类**——32B `SecureRandom` hex 归 `ChallengeTokenService`（Task 8），与本批 `generateRefreshToken` 同模式
 
-- [ ] **Step 1: 写失败单测（RFC 6238 官方向量）**
+- [x] **Step 1: 写失败单测（RFC 6238 官方向量）**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -931,12 +895,12 @@ class TotpUtilTest {
 }
 ```
 
-- [ ] **Step 2: 跑测试验证失败**
+- [x] **Step 2: 跑测试验证失败**
 
 Run: `mvn test -Dtest=TotpUtilTest`
 Expected: 编译失败（`TotpUtil` 类不存在）。
 
-- [ ] **Step 3: 实现 TotpUtil**
+- [x] **Step 3: 实现 TotpUtil**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -1058,12 +1022,12 @@ public final class TotpUtil {
 }
 ```
 
-- [ ] **Step 4: 跑测试验证通过**
+- [x] **Step 4: 跑测试验证通过**
 
 Run: `mvn test -Dtest=TotpUtilTest`
 Expected: 3 个测试全部 PASS（向量值 287082/081804/005924/279037 与 RFC 6238 附录 B 一致）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/common/auth/TotpUtil.java src/test/java/com/sanye/strategy/common/auth/TotpUtilTest.java
@@ -1085,7 +1049,7 @@ git commit -m "feat(auth): 批1 TotpUtil — RFC 6238 TOTP + 自实现 Base32 + 
 - Produces: `JtiBlacklistService.revoke(Long jti, long ttlSeconds)`、`JtiBlacklistService.isRevoked(Long jti):boolean`、`JtiBlacklistService.remove(Long jti)`（Task 11 拦截器 isRevoked、Task 13 AuthService 登出/刷新调用）
 - Produces: `ChallengeTokenService.issue(Long userId, String deviceId, int ttlSeconds):String`、`ChallengeTokenService.consume(String tempToken):ChallengeBinding`（`ChallengeBinding` = record(userId, deviceId)；返回 null 表示已消费/过期）（Task 13 login 签发挑战、verifyMfa GETDEL 消费）
 
-- [ ] **Step 1: 写失败单测**
+- [x] **Step 1: 写失败单测**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -1140,12 +1104,12 @@ class JtiBlacklistServiceTest {
 }
 ```
 
-- [ ] **Step 2: 跑测试验证失败**
+- [x] **Step 2: 跑测试验证失败**
 
 Run: `mvn test -Dtest=JtiBlacklistServiceTest`
 Expected: 编译失败（`JtiBlacklistService` 类不存在）。
 
-- [ ] **Step 3: 实现 JtiBlacklistService**
+- [x] **Step 3: 实现 JtiBlacklistService**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -1213,12 +1177,12 @@ public class JtiBlacklistService {
 }
 ```
 
-- [ ] **Step 4: 跑测试验证通过**
+- [x] **Step 4: 跑测试验证通过**
 
 Run: `mvn test -Dtest=JtiBlacklistServiceTest`
 Expected: 3 个测试全部 PASS。
 
-- [ ] **Step 5: 写 ChallengeTokenService 失败单测**
+- [x] **Step 5: 写 ChallengeTokenService 失败单测**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -1279,7 +1243,7 @@ class ChallengeTokenServiceTest {
 }
 ```
 
-- [ ] **Step 6: 实现 ChallengeTokenService**
+- [x] **Step 6: 实现 ChallengeTokenService**
 
 ```java
 package com.sanye.strategy.common.auth;
@@ -1371,12 +1335,12 @@ public class ChallengeTokenService {
 }
 ```
 
-- [ ] **Step 7: 跑测试验证通过**
+- [x] **Step 7: 跑测试验证通过**
 
 Run: `mvn test -Dtest=ChallengeTokenServiceTest`
 Expected: 3 个测试全部 PASS。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/common/auth/JtiBlacklistService.java src/main/java/com/sanye/strategy/common/auth/ChallengeTokenService.java src/test/java/com/sanye/strategy/common/auth/JtiBlacklistServiceTest.java src/test/java/com/sanye/strategy/common/auth/ChallengeTokenServiceTest.java
@@ -1394,7 +1358,7 @@ git commit -m "feat(auth): 批1 Redis 双用途 — JtiBlacklistService(jti 黑�
 - Consumes: `UserContext.get()`（Task 5）
 - Produces: 插入/更新时自动填充 `createUserId`/`updateUserId`（缺陷 5 修复；无上下文落 NULL 不阻断，后台脚本场景）
 
-- [ ] **Step 1: 改造 metaObjectHandler**
+- [x] **Step 1: 改造 metaObjectHandler**
 
 `MybatisPlusConfig.java`：
 1. 加 import：`import com.sanye.strategy.common.auth.UserContext;`
@@ -1425,12 +1389,12 @@ git commit -m "feat(auth): 批1 Redis 双用途 — JtiBlacklistService(jti 黑�
 
 同时更新类 javadoc：`createUserId/updateUserId 待用户上下文接入后补充` → `已由拦截器填充 UserContext，MetaObjectHandler 从上下文取值`。
 
-- [ ] **Step 2: 编译验证**
+- [x] **Step 2: 编译验证**
 
 Run: `mvn compile -q`
 Expected: BUILD SUCCESS。（无单测——需 MyBatis 上下文；行为经 Task 14 冒烟：注册（无上下文）落 NULL 不 NPE，批2 有鉴权写接口后验证真值填充。）
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/common/config/MybatisPlusConfig.java
@@ -1459,7 +1423,7 @@ git commit -m "feat(auth): 批1 MetaObjectHandler — 从 UserContext 填充 cre
   - `HashUtil.sha256Hex(String):String`
   - `DeviceInfo`（`deviceType:Integer, deviceOs, deviceBrand, deviceModel, deviceId, appVersion`，`deviceId @NotBlank`）
 
-- [ ] **Step 1: 写失败单测**
+- [x] **Step 1: 写失败单测**
 
 ```java
 package com.sanye.strategy.device.service;
@@ -1542,12 +1506,12 @@ class DeviceServiceTest {
 }
 ```
 
-- [ ] **Step 2: 跑测试验证失败**
+- [x] **Step 2: 跑测试验证失败**
 
 Run: `mvn test -Dtest=DeviceServiceTest`
 Expected: 编译失败（`DeviceService`/`DeviceInfo`/`HashUtil` 不存在）。
 
-- [ ] **Step 3: 实现 HashUtil**
+- [x] **Step 3: 实现 HashUtil**
 
 ```java
 package com.sanye.strategy.common.util;
@@ -1589,7 +1553,7 @@ public final class HashUtil {
 }
 ```
 
-- [ ] **Step 4: 实现 DeviceInfo**
+- [x] **Step 4: 实现 DeviceInfo**
 
 ```java
 package com.sanye.strategy.device.dto;
@@ -1644,7 +1608,7 @@ public class DeviceInfo {
 }
 ```
 
-- [ ] **Step 5: 实现 DeviceService**
+- [x] **Step 5: 实现 DeviceService**
 
 ```java
 package com.sanye.strategy.device.service;
@@ -1770,12 +1734,12 @@ public class DeviceService {
 }
 ```
 
-- [ ] **Step 6: 跑测试验证通过**
+- [x] **Step 6: 跑测试验证通过**
 
 Run: `mvn test -Dtest=DeviceServiceTest`
 Expected: 4 个测试全部 PASS。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/device/dto/DeviceInfo.java src/main/java/com/sanye/strategy/device/service/DeviceService.java src/main/java/com/sanye/strategy/common/util/HashUtil.java src/test/java/com/sanye/strategy/device/service/DeviceServiceTest.java
@@ -1795,7 +1759,7 @@ git commit -m "feat(auth): 批1 DeviceService — 会话行属主核心（create
 - Consumes: `JwtUtil.parseToken` / `JwtUtil`、`JtiBlacklistService.isRevoked`（Task 6/8）、`UserContext`（Task 5）
 - Produces: 白名单外请求强制认证，认证通过填充 `UserContext`、`afterCompletion` 清除；`WebMvcConfig` 注册拦截器并声明白名单
 
-- [ ] **Step 1: 写失败单测**
+- [x] **Step 1: 写失败单测**
 
 ```java
 package com.sanye.strategy.common.interceptor;
@@ -1931,12 +1895,12 @@ class TokenAuthInterceptorTest {
 }
 ```
 
-- [ ] **Step 2: 跑测试验证失败**
+- [x] **Step 2: 跑测试验证失败**
 
 Run: `mvn test -Dtest=TokenAuthInterceptorTest`
 Expected: 编译失败（`TokenAuthInterceptor` 不存在）。
 
-- [ ] **Step 3: 实现 TokenAuthInterceptor**
+- [x] **Step 3: 实现 TokenAuthInterceptor**
 
 ```java
 package com.sanye.strategy.common.interceptor;
@@ -2027,7 +1991,7 @@ public class TokenAuthInterceptor implements HandlerInterceptor {
 }
 ```
 
-- [ ] **Step 4: 实现 WebMvcConfig**
+- [x] **Step 4: 实现 WebMvcConfig**
 
 ```java
 package com.sanye.strategy.common.config;
@@ -2070,12 +2034,12 @@ public class WebMvcConfig implements WebMvcConfigurer {
 }
 ```
 
-- [ ] **Step 5: 跑测试验证通过**
+- [x] **Step 5: 跑测试验证通过**
 
 Run: `mvn test -Dtest=TokenAuthInterceptorTest`
 Expected: 7 个测试全部 PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/common/interceptor/TokenAuthInterceptor.java src/main/java/com/sanye/strategy/common/config/WebMvcConfig.java src/test/java/com/sanye/strategy/common/interceptor/TokenAuthInterceptorTest.java
@@ -2096,7 +2060,7 @@ git commit -m "feat(auth): 批1 TokenAuthInterceptor + WebMvcConfig — 认证�
 **Interfaces:**
 - Produces: 五个 DTO/VO 类型（Task 13 AuthService 签名、Task 14 AuthController 请求/响应）
 
-- [ ] **Step 1: 创建 RegisterDTO**
+- [x] **Step 1: 创建 RegisterDTO**
 
 ```java
 package com.sanye.strategy.auth.dto;
@@ -2152,7 +2116,7 @@ public class RegisterDTO {
 }
 ```
 
-- [ ] **Step 2: 创建 LoginDTO**
+- [x] **Step 2: 创建 LoginDTO**
 
 ```java
 package com.sanye.strategy.auth.dto;
@@ -2191,7 +2155,7 @@ public class LoginDTO {
 }
 ```
 
-- [ ] **Step 3: 创建 RefreshDTO**
+- [x] **Step 3: 创建 RefreshDTO**
 
 ```java
 package com.sanye.strategy.auth.dto;
@@ -2219,7 +2183,7 @@ public class RefreshDTO {
 }
 ```
 
-- [ ] **Step 4: 创建 MfaVerifyDTO + MfaChallengeVO**
+- [x] **Step 4: 创建 MfaVerifyDTO + MfaChallengeVO**
 
 ```java
 package com.sanye.strategy.auth.dto;
@@ -2291,7 +2255,7 @@ public class MfaChallengeVO {
 }
 ```
 
-- [ ] **Step 5: 创建 TokenVO**
+- [x] **Step 5: 创建 TokenVO**
 
 ```java
 package com.sanye.strategy.auth.dto;
@@ -2323,12 +2287,12 @@ public class TokenVO {
 }
 ```
 
-- [ ] **Step 6: 编译验证**
+- [x] **Step 6: 编译验证**
 
 Run: `mvn compile -q`
 Expected: BUILD SUCCESS。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/auth/dto/
@@ -2348,7 +2312,7 @@ git commit -m "feat(auth): 批1 Auth DTOs — Register/Login/Refresh/MfaVerify{t
 - Consumes: 全部 base service + 门面/工具（`UmsUserService`、`UmsUserAccountSecurityService`、`UmsUserProfileService`、`DeviceService`、`PasswordEncoder`、`JwtUtil`、`TotpUtil`、`JtiBlacklistService`、`ChallengeTokenService`、`TransactionTemplate`）、DTO（Task 12）。`PasswordEncoder` 仅 register/login 用；`verifyMfa` 用 `ChallengeTokenService`/`TotpUtil`
 - Produces: `AuthService.register(RegisterDTO, String clientIp):TokenVO`、`login(LoginDTO, String clientIp):TokenVO`、`verifyMfa(MfaVerifyDTO, String clientIp):TokenVO`、`refresh(RefreshDTO):TokenVO`、`logout()`、`IpUtils.getClientIp(HttpServletRequest):String`
 
-- [ ] **Step 1: 写失败单测**
+- [x] **Step 1: 写失败单测**
 
 ```java
 package com.sanye.strategy.auth.service;
@@ -2813,12 +2777,12 @@ class AuthServiceTest {
 }
 ```
 
-- [ ] **Step 2: 跑测试验证失败**
+- [x] **Step 2: 跑测试验证失败**
 
 Run: `mvn test -Dtest=AuthServiceTest`
 Expected: 编译失败（`AuthService`/`IpUtils` 不存在）。
 
-- [ ] **Step 3: 实现 IpUtils**
+- [x] **Step 3: 实现 IpUtils**
 
 ```java
 package com.sanye.strategy.common.util;
@@ -2851,7 +2815,7 @@ public final class IpUtils {
 }
 ```
 
-- [ ] **Step 4: 实现 AuthService**
+- [x] **Step 4: 实现 AuthService**
 
 ```java
 package com.sanye.strategy.auth.service;
@@ -3264,12 +3228,12 @@ public class AuthService {
 
 > 说明：`refresh()` 内 SHA-256 调用使用全限定名 `com.sanye.strategy.common.util.HashUtil.sha256Hex`，可改 import 引入，二选一即可。
 
-- [ ] **Step 5: 跑测试验证通过**
+- [x] **Step 5: 跑测试验证通过**
 
 Run: `mvn test -Dtest=AuthServiceTest`
 Expected: 19 个测试全部 PASS（注册 3 + 登录 8 + MFA verify 4 + 刷新 3 + 登出 1）。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/auth/service/AuthService.java src/main/java/com/sanye/strategy/common/util/IpUtils.java src/test/java/com/sanye/strategy/auth/service/AuthServiceTest.java
@@ -3287,7 +3251,7 @@ git commit -m "feat(auth): 批1 AuthService — 注册/登录/刷新/登出/MFA�
 - Consumes: `AuthService`（Task 13）、DTO（Task 12）、`IpUtils`（Task 13）
 - Produces: HTTP 端点 `POST /auth/register|login|refresh|mfa/verify|logout`（白名单前 4 个 + logout 走拦截器鉴权）
 
-- [ ] **Step 1: 实现 AuthController**
+- [x] **Step 1: 实现 AuthController**
 
 ```java
 package com.sanye.strategy.auth.controller;
@@ -3369,12 +3333,12 @@ public class AuthController {
 }
 ```
 
-- [ ] **Step 2: 全量编译 + 测试**
+- [x] **Step 2: 全量编译 + 测试**
 
 Run: `mvn test`
 Expected: 全部现有测试 + 本批新增测试 PASS，BUILD SUCCESS。（现有 `DeleteFlagEnumTypeHandlerTest` 应保持绿。）
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/main/java/com/sanye/strategy/auth/controller/AuthController.java
@@ -3396,12 +3360,12 @@ git commit -m "feat(auth): 批1 AuthController — 注册/登录/刷新/MFA验�
 2. Task 2 迁移脚本已在 `sys_strategy` 库执行。
 3. 应用启动：`mvn spring-boot:run`（dev 配置）。
 
-- [ ] **Step 1: 启动应用**
+- [x] **Step 1: 启动应用**
 
 Run: `mvn spring-boot:run`
 Expected: 应用启动无异常（日志无 SqlSessionFactory 相关报错）。
 
-- [ ] **Step 2: 注册 → 得双 Token**
+- [x] **Step 2: 注册 → 得双 Token**
 
 Run（新开终端，curl 或 Postman；`jq` 提取 token）：
 ```bash
@@ -3411,14 +3375,14 @@ curl -s -X POST http://localhost:8080/auth/register \
 ```
 Expected: `code=200`，`data.accessToken`（三段 JWT，payload 含 `type=ACCESS`）、`data.refreshToken`（64 位 hex）、`data.accessExpiresIn=1800`。
 
-- [ ] **Step 3: 未带 token 访问登出 → 401**
+- [x] **Step 3: 未带 token 访问登出 → 401**
 
 ```bash
 curl -s -X POST http://localhost:8080/auth/logout
 ```
 Expected: `code=401`。
 
-- [ ] **Step 4: 登出（带 token）→ 200，再带同 token 登出 → 401**
+- [x] **Step 4: 登出（带 token）→ 200，再带同 token 登出 → 401**
 
 ```bash
 # ACCESS=$(上一步 data.accessToken)
@@ -3428,7 +3392,7 @@ curl -s -X POST http://localhost:8080/auth/logout -H "Authorization: Bearer $ACC
 ```
 Expected: 第一次 `code=200`；第二次 `code=401`（jti 黑名单秒级冻结生效，且 refresh 会话已失效）。
 
-- [ ] **Step 5: 登录 → 刷新轮换**
+- [x] **Step 5: 登录 → 刷新轮换**
 
 ```bash
 # LOGIN=$(curl -s -X POST http://localhost:8080/auth/login -H 'Content-Type: application/json' \
@@ -3440,7 +3404,7 @@ curl -s -X POST http://localhost:8080/auth/refresh \
 ```
 Expected: `code=200`，返回新双 Token；旧 `$RT` 再刷新 → `code=401`（轮换防重放）。
 
-- [ ] **Step 6: 防爆破锁 30min**
+- [x] **Step 6: 防爆破锁 30min**
 
 ```bash
 # 连续 5 次错密码
@@ -3452,7 +3416,7 @@ curl -s -X POST http://localhost:8080/auth/login -H 'Content-Type: application/j
 ```
 Expected: 前 5 次 `code=401`（第 5 次置 lockTime）；正确密码 → `code=403 ACCOUNT_LOCKED`。
 
-- [ ] **Step 7: MFA 挑战凭证链路（SQL 手动开启）**
+- [x] **Step 7: MFA 挑战凭证链路（SQL 手动开启）**
 
 ```bash
 # SQL：UPDATE ums_user_account_security SET mfa_status=1, mfa_secret='GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' WHERE user_id=<id>;
@@ -3470,7 +3434,7 @@ curl -s -X POST http://localhost:8080/auth/mfa/verify -H 'Content-Type: applicat
 ```
 Expected: 阶段 1 `code=403 MFA_REQUIRED`，`data.tempToken`（64 位 hex）+ `data.expiresIn=300`，无 access/refresh token；阶段 2 `code=200`，返回双 Token；重放 → `code=401 MFA_CHALLENGE_EXPIRED`（GETDEL 单次消费防重放生效）。OTP 错（`code=000000`）→ `code=401`（验证码错误，计数 +1）；错码后再重放同 `$TEMP` → 401 挑战已消费。
 
-- [ ] **Step 8: 恢复账号 + 记录冒烟结论**
+- [x] **Step 8: 恢复账号 + 记录冒烟结论**
 
 ```bash
 # SQL：UPDATE ums_user_account_security SET mfa_status=0 WHERE user_id=<id>;
@@ -3489,7 +3453,7 @@ Expected: 冒烟通过项：注册/登录/登出/黑名单秒级/刷新轮换/�
 
 **Interfaces:** 无（文档）
 
-- [ ] **Step 1: spec 纠偏**
+- [x] **Step 1: spec 纠偏**
 
 `2026-08-07-user-center-design.md`：
 1. §4.3 白名单行改为含 `/auth/mfa/verify`：
@@ -3508,7 +3472,7 @@ POST /auth/mfa/verify {tempToken, code, deviceInfo}
 
 3. §8.3 注释改为「新库建表见 `sql/user.sql`（已含该列 + `idx_refresh_token_hash` + `idx_user_current`）」并在 ALTER 语句保留（存量库用）。
 
-- [ ] **Step 2: CLAUDE.md 更新**
+- [x] **Step 2: CLAUDE.md 更新**
 
 1. 技术栈 Redis 行补充「依赖：spring-data-redis + Lettuce」已存在则跳过；Redis 用途句「仅作 accessToken jti 吊销黑名单」→「双用途：jti 吊销黑名单 + MFA 挑战凭证 tempToken（5min TTL、GETDEL 单次消费、瞬态，非会话/业务缓存）」；确认 `jwt.secret` 用法有一行说明。（**注：Redis 行本次设计变更已直接落地 CLAUDE.md，此处核对即可。**）
 2. 包结构补 `auth/`、`device/` 两个能力包 + `common/auth`（JwtUtil/UserContext/PasswordEncoder/TotpUtil/JtiBlacklistService/ChallengeTokenService，注明 ChallengeTokenService 键域 `mfa:*`、GETDEL 原子单次消费）+ `common/interceptor`（TokenAuthInterceptor，标注「拦截器（待实现）」→ 已实现）。
@@ -3519,14 +3483,14 @@ POST /auth/mfa/verify {tempToken, code, deviceInfo}
 7. DTO/VO 定义补：`MfaVerifyDTO`（`{tempToken, code, deviceInfo}`，无 account/password，userId 由挑战绑定解出）+ `MfaChallengeVO`（`{tempToken, expiresIn}`，仅随 403 MFA_REQUIRED 返回一次）。
 8. 已知缺陷与待办表：`createUserId/updateUserId 无用户上下文` 🟠 → ✅ 已修复（批1 UserContext + MetaObjectHandler）；新增行「认证主链批1 已落地（注册/登录/刷新/登出/MFA 挑战凭证验证 + jti 黑名单）」，批2-6 状态不变。
 
-- [ ] **Step 3: 勾选本文件全部任务复选框**
+- [x] **Step 3: 勾选本文件全部任务复选框**
 
-- [ ] **Step 4: 全量回归**
+- [x] **Step 4: 全量回归**
 
 Run: `mvn test`
 Expected: BUILD SUCCESS，全部测试绿。
 
-- [ ] **Step 5: 最终提交**
+- [x] **Step 5: 最终提交**
 
 ```bash
 git add docs/superpowers/specs/2026-08-07-user-center-design.md CLAUDE.md docs/superpowers/plans/2026-08-07-user-center-batch1-auth.md

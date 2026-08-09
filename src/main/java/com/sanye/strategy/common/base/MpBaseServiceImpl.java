@@ -265,7 +265,7 @@ public abstract class MpBaseServiceImpl<P extends SimpleBasePO, M extends BaseMa
 
     @Override
     protected boolean doInsert(T entity) {
-        return baseMapper.insert(toPO(entity)) > 0;
+        return insertEntityWithBackfill(entity);
     }
 
     @Override
@@ -328,7 +328,7 @@ public abstract class MpBaseServiceImpl<P extends SimpleBasePO, M extends BaseMa
         if (po.getId() != null) {
             return baseMapper.updateById(po) > 0;
         }
-        return baseMapper.insert(po) > 0;
+        return insertEntityWithBackfill(entity);
     }
 
     @Override
@@ -338,9 +338,27 @@ public abstract class MpBaseServiceImpl<P extends SimpleBasePO, M extends BaseMa
         }
         int affected = 0;
         for (T entity : entityList) {
-            affected += baseMapper.insert(toPO(entity)) > 0 ? 1 : 0;
+            affected += insertEntityWithBackfill(entity) ? 1 : 0;
         }
         return affected;
+    }
+
+    /**
+     * 插入并回填主键：MP 雪花主键（ASSIGN_ID）生成于 PO 层，插入后须回填到实体，
+     * 否则业务侧 {@code entity.getId()} 仍为 null —— 注册/登录经
+     * {@code initSecurity/initProfile/createSession} 引用 user.id 时触发
+     * {@code user_id NOT NULL} 违例（端到端冒烟发现）。
+     *
+     * @param entity 待插入实体（插入成功且 PO 有主键时回填 id）
+     * @return 是否插入成功
+     */
+    private boolean insertEntityWithBackfill(T entity) {
+        P po = toPO(entity);
+        boolean ok = baseMapper.insert(po) > 0;
+        if (ok && po.getId() != null) {
+            entity.setId(po.getId());
+        }
+        return ok;
     }
 
     @Override

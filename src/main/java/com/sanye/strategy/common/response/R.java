@@ -83,6 +83,19 @@ public class R<T> implements Serializable {
         return new R<>(resultCode, message, null);
     }
 
+    /**
+     * 失败响应（自定义提示语 + 数据载荷）
+     *
+     * @param <T>        数据类型
+     * @param resultCode 状态码
+     * @param message    自定义提示信息
+     * @param data       响应数据（如 MFA 挑战凭证）
+     * @return R 实例
+     */
+    public static <T> R<T> fail(ResultCode resultCode, String message, T data) {
+        return new R<>(resultCode, message, data);
+    }
+
     // ==================== Getter / Setter ====================
 
     public int getCode() {

@@ -106,6 +106,7 @@ com.sanye.strategy
 | refreshToken | 不透明随机串（`SecureRandom` 32B） | 无 | 14 天 | `ums_user_login_device.refresh_token_hash` |
 
 - `jti` = 会话行 id。吊销会话 = 失效对应会话行
+- `jti` claim 为 String（RFC 7519 规定 jti 为 case-sensitive 字符串，jjwt 0.12.6 拒绝数值型 jti）：`JwtUtil` 签发时 `String.valueOf(jti)` 落串，消费方（`TokenAuthInterceptor`）`Long.valueOf(claims.get("jti", String.class))` 还原会话行 id
 - accessToken 无状态校验（JWT 验签），请求不打库；refreshToken 服务端按 `refresh_token_hash` 查会话行，校验是否有效（`is_current=1`、`expire_time` 未过、非逻辑删除）
 - 区分两种 Token：accessToken 为 JWT 三段（`.`,分隔，`eyJ...`），且验签后强制校验 `type=ACCESS`；refreshToken 为 32B 不透明串，无结构，二者格式天然互斥、互不冒充
 - refreshToken 只存 SHA-256 哈希（Hex）于 `refresh_token_hash`，不存明文
@@ -116,7 +117,7 @@ com.sanye.strategy
 ### 4.2 JWT 与密钥
 
 - 依赖：`io.jsonwebtoken:jjwt-api` / `jjwt-impl` / `jjwt-jackson`（0.12.x）
-- HS256 对称签名，密钥 ≥ 32 字节，从配置注入（`jwt.secret`），环境变量/密管覆盖，不进代码不入库
+- HS256 对称签名（签发与验签均显式钉死 `Jwts.SIG.HS256`，不随密钥长度推断；解析器注册表收敛为 HS256 单元素，HS384/HS512/RS/ES/PS/EdDSA/none 一律拒绝），密钥 ≥ 32 字节，从配置注入（`jwt.secret`），环境变量/密管覆盖，不进代码不入库
 - 算法/密钥演进：`JwtUtil` 内做 signKey 前缀版本（`kid` claim），轮换时新旧密钥并存验证
 
 ### 4.3 认证管道（TokenAuthInterceptor）
@@ -360,7 +361,7 @@ ALTER TABLE ums_user_login_device
   ADD KEY idx_refresh_token_hash (refresh_token_hash);     -- 刷新按 hash 查会话行
 ```
 
-> 注：新库建表见 `sql/user.sql`（`ums_user_login_device` 已含该列 + 索引）；此为存量库升级用一次性 DDL。MySQL 8.0 不支持 `ADD COLUMN IF NOT EXISTS`，重复执行需人工判断。
+> 注：新库建表见 `sql/user.sql`（`ums_user_login_device` 已含该列 + `idx_refresh_token_hash` + `idx_user_current`）；此为存量库升级用一次性 DDL。MySQL 8.0 不支持 `ADD COLUMN IF NOT EXISTS`，重复执行需人工判断。
 
 > **MFA 挑战凭证无 DDL**：tempToken 驻留 Redis（5min TTL 自动过期），不新增 DB 列、无迁移脚本（不同于 `refresh_token_hash` 需列）。实现勿误建列。
 

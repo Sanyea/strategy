@@ -171,10 +171,14 @@ protected abstract boolean doSaveOrUpdateBatch(Collection<T> entityList);
 protected <R> R doInTransaction(Supplier<R> action) { return action.get(); }
 
 // 钩子方法（子类按需覆盖）
-protected void beforeInsert(T entity) {}
-protected void afterInsert(T entity) {}
-protected void beforeUpdate(T entity) {}
-protected void afterUpdate(T entity) {}
+protected void beforeInsert(T entity) {}                     protected void afterInsert(T entity) {}
+protected void beforeUpdate(T entity) {}                     protected void afterUpdate(T entity) {}
+protected void beforeInsertBatch(Collection<T> list) {}      protected void afterInsertBatch(Collection<T> list) {}
+protected void beforeUpdateBatch(Collection<T> list) {}      protected void afterUpdateBatch(Collection<T> list) {}
+protected void beforeDelete(Serializable id) {}              protected void afterDelete(Serializable id) {}
+protected void beforeDeleteBatch(Collection<? extends Serializable> ids) {}  protected void afterDeleteBatch(Collection<? extends Serializable> ids) {}
+protected void beforeSaveOrUpdate(T entity) {}               protected void afterSaveOrUpdate(T entity) {}
+protected void beforeSaveOrUpdateBatch(Collection<T> list) {}  protected void afterSaveOrUpdateBatch(Collection<T> list) {}
 ```
 
 **事务架构（设计 B：事务抽象钩子）：**

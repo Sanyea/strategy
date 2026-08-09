@@ -1,6 +1,7 @@
 package com.sanye.strategy.common.config;
 
 import com.sanye.strategy.common.base.DeleteFlagEnum;
+import com.sanye.strategy.common.base.IPersistEnum;
 import org.apache.ibatis.type.BaseTypeHandler;
 import org.apache.ibatis.type.JdbcType;
 import org.apache.ibatis.type.MappedTypes;

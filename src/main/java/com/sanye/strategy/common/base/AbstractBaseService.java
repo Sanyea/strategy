@@ -49,17 +49,26 @@ public abstract class AbstractBaseService<T> implements IService<T> {
 
     @Override
     public boolean saveOrUpdate(T entity) {
-        return doSaveOrUpdate(entity);
+        beforeSaveOrUpdate(entity);
+        boolean result = doSaveOrUpdate(entity);
+        afterSaveOrUpdate(entity);
+        return result;
     }
 
     @Override
     public boolean insertBatch(Collection<T> entityList) {
-        return doInTransaction(() -> doInsertBatch(entityList));
+        beforeInsertBatch(entityList);
+        boolean result = doInTransaction(() -> doInsertBatch(entityList));
+        afterInsertBatch(entityList);
+        return result;
     }
 
     @Override
     public boolean saveOrUpdateBatch(Collection<T> entityList) {
-        return doInTransaction(() -> doSaveOrUpdateBatch(entityList));
+        beforeSaveOrUpdateBatch(entityList);
+        boolean result = doInTransaction(() -> doSaveOrUpdateBatch(entityList));
+        afterSaveOrUpdateBatch(entityList);
+        return result;
     }
 
     // ==================== 更新相关 ====================
@@ -74,19 +83,28 @@ public abstract class AbstractBaseService<T> implements IService<T> {
 
     @Override
     public boolean updateBatch(Collection<T> entityList) {
-        return doInTransaction(() -> doUpdateBatch(entityList));
+        beforeUpdateBatch(entityList);
+        boolean result = doInTransaction(() -> doUpdateBatch(entityList));
+        afterUpdateBatch(entityList);
+        return result;
     }
 
     // ==================== 删除相关 ====================
 
     @Override
     public boolean deleteById(Serializable id) {
-        return doDeleteById(id);
+        beforeDelete(id);
+        boolean result = doDeleteById(id);
+        afterDelete(id);
+        return result;
     }
 
     @Override
     public boolean deleteBatch(Collection<? extends Serializable> idList) {
-        return doInTransaction(() -> doDeleteBatch(idList));
+        beforeDeleteBatch(idList);
+        boolean result = doInTransaction(() -> doDeleteBatch(idList));
+        afterDeleteBatch(idList);
+        return result;
     }
 
     // ==================== 查询相关 ====================
@@ -193,5 +211,77 @@ public abstract class AbstractBaseService<T> implements IService<T> {
      * 更新后钩子，子类可覆盖以实现日志记录、事件发布等
      */
     protected void afterUpdate(T entity) {
+    }
+
+    /**
+     * 批量新增前钩子，子类可覆盖以实现批量数据校验、字段填充等
+     */
+    protected void beforeInsertBatch(Collection<T> entityList) {
+    }
+
+    /**
+     * 批量新增后钩子，子类可覆盖以实现日志记录、事件发布等
+     */
+    protected void afterInsertBatch(Collection<T> entityList) {
+    }
+
+    /**
+     * 批量更新前钩子，子类可覆盖以实现批量数据校验、字段填充等
+     */
+    protected void beforeUpdateBatch(Collection<T> entityList) {
+    }
+
+    /**
+     * 批量更新后钩子，子类可覆盖以实现日志记录、事件发布等
+     */
+    protected void afterUpdateBatch(Collection<T> entityList) {
+    }
+
+    /**
+     * 删除前钩子，子类可覆盖以实现删除前校验（如关联数据检查）
+     */
+    protected void beforeDelete(Serializable id) {
+    }
+
+    /**
+     * 删除后钩子，子类可覆盖以实现日志记录、事件发布等
+     */
+    protected void afterDelete(Serializable id) {
+    }
+
+    /**
+     * 批量删除前钩子，子类可覆盖以实现删除前校验（如关联数据检查）
+     */
+    protected void beforeDeleteBatch(Collection<? extends Serializable> idList) {
+    }
+
+    /**
+     * 批量删除后钩子，子类可覆盖以实现日志记录、事件发布等
+     */
+    protected void afterDeleteBatch(Collection<? extends Serializable> idList) {
+    }
+
+    /**
+     * 新增或更新前钩子，子类可覆盖以实现数据校验、字段填充等
+     */
+    protected void beforeSaveOrUpdate(T entity) {
+    }
+
+    /**
+     * 新增或更新后钩子，子类可覆盖以实现日志记录、事件发布等
+     */
+    protected void afterSaveOrUpdate(T entity) {
+    }
+
+    /**
+     * 批量新增或更新前钩子，子类可覆盖以实现数据校验、字段填充等
+     */
+    protected void beforeSaveOrUpdateBatch(Collection<T> entityList) {
+    }
+
+    /**
+     * 批量新增或更新后钩子，子类可覆盖以实现日志记录、事件发布等
+     */
+    protected void afterSaveOrUpdateBatch(Collection<T> entityList) {
     }
 }

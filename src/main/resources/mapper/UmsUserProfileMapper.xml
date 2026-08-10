@@ -1,10 +1,10 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.sanye.strategy.mapper.UmsUserProfileMapper">
+<mapper namespace="com.sanye.strategy.infrastructure.persistence.mapper.UmsUserProfileMapper">
 
-    <resultMap id="BaseResultMap" type="com.sanye.strategy.po.UmsUserProfilePO">
+    <resultMap id="BaseResultMap" type="com.sanye.strategy.infrastructure.persistence.po.UmsUserProfilePO">
             <id property="id" column="id" />
             <result property="userId" column="user_id" />
             <result property="country" column="country" />

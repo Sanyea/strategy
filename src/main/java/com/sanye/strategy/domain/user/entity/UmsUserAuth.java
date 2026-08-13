@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.domain.user.entity;
+package com.sanye.strategy.domain.user.entity;
 
 import com.sanye.strategy.common.base.SimpleBaseEntity;
 import com.sanye.strategy.domain.enums.IdentityTypeEnum;

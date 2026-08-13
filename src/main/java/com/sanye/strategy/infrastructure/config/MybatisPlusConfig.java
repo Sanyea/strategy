@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.infrastructure.config;
+package com.sanye.strategy.infrastructure.config;
 
 import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;

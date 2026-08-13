@@ -1,6 +1,7 @@
-﻿package com.sanye.strategy.interfaces.auth.dto;
+package com.sanye.strategy.interfaces.auth.dto;
 
 import com.sanye.strategy.application.device.dto.DeviceInfo;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -20,19 +21,23 @@ import lombok.Data;
  * @author 31372
  */
 @Data
+@Schema(description = "MFA 二次验证请求")
 public class MfaVerifyDTO {
 
     /** 挑战凭证（登录 403 MFA_REQUIRED 响应携带） */
     @NotBlank(message = "挑战凭证不能为空")
+    @Schema(description = "挑战凭证（登录 403 响应中获取）")
     private String tempToken;
 
     /** 6 位 TOTP 验证码 */
     @NotBlank(message = "验证码不能为空")
     @Pattern(regexp = "^\\d{6}$", message = "验证码为6位数字")
+    @Schema(description = "6 位 TOTP 验证码", example = "123456", pattern = "^\\d{6}$")
     private String code;
 
     /** 设备信息（会话行落库 + deviceId 比对） */
     @Valid
     @NotNull(message = "设备信息不能为空")
+    @Schema(description = "客户端设备信息")
     private DeviceInfo deviceInfo;
 }

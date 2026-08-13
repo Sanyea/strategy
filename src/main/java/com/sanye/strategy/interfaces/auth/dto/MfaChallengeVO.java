@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.interfaces.auth.dto;
+package com.sanye.strategy.interfaces.auth.dto;
 
 import lombok.Data;
 

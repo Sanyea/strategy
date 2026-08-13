@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.application.auth;
+package com.sanye.strategy.application.auth;
 
 import com.sanye.strategy.interfaces.auth.dto.LoginDTO;
 import com.sanye.strategy.interfaces.auth.dto.MfaChallengeVO;

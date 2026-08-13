@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.infrastructure.security;
+package com.sanye.strategy.infrastructure.security;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;

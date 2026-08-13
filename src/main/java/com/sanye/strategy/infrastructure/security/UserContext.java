@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.infrastructure.security;
+package com.sanye.strategy.infrastructure.security;
 
 import com.sanye.strategy.domain.enums.UserTypeEnum;
 

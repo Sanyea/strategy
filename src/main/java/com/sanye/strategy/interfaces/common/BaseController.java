@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.interfaces.common;
+package com.sanye.strategy.interfaces.common;
 
 import com.sanye.strategy.common.base.IBaseService;
 import com.sanye.strategy.common.base.IWrapper;

@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.domain.user.repository;
+package com.sanye.strategy.domain.user.repository;
 
 import com.sanye.strategy.common.base.IService;
 import com.sanye.strategy.domain.user.entity.UmsUserAuth;

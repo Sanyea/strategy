@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.infrastructure.security;
+package com.sanye.strategy.infrastructure.security;
 
 import org.mindrot.jbcrypt.BCrypt;
 import org.springframework.stereotype.Component;

@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.infrastructure.persistence.mapper;
+package com.sanye.strategy.infrastructure.persistence.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.sanye.strategy.infrastructure.persistence.po.UmsUserAccountSecurityPO;

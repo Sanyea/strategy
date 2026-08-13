@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.application.device;
+package com.sanye.strategy.application.device;
 
 import com.sanye.strategy.common.base.DefaultQueryWrapper;
 import com.sanye.strategy.common.util.HashUtil;

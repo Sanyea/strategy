@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.infrastructure.redis;
+package com.sanye.strategy.infrastructure.redis;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;

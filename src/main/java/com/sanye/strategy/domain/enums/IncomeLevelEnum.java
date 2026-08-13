@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.domain.enums;
+package com.sanye.strategy.domain.enums;
 
 import com.baomidou.mybatisplus.annotation.EnumValue;
 

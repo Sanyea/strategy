@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.infrastructure.config;
+package com.sanye.strategy.infrastructure.config;
 
 import com.sanye.strategy.common.base.DeleteFlagEnum;
 import com.sanye.strategy.common.base.IPersistEnum;

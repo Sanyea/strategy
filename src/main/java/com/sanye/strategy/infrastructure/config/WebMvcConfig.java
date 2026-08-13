@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.infrastructure.config;
+package com.sanye.strategy.infrastructure.config;
 
 import com.sanye.strategy.infrastructure.interceptor.TokenAuthInterceptor;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +24,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
     /** 白名单：无需登录即可访问 */
     private static final String[] WHITE_LIST = {
             "/auth/login", "/auth/register", "/auth/refresh", "/auth/mfa/verify",
-            "/actuator/**", "/error"
+            "/actuator/**", "/error",
+            "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html"
     };
 
     private final TokenAuthInterceptor tokenAuthInterceptor;

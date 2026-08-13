@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.infrastructure.persistence.po;
+package com.sanye.strategy.infrastructure.persistence.po;
 
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.sanye.strategy.common.base.SimpleBasePO;

@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.infrastructure.interceptor;
+package com.sanye.strategy.infrastructure.interceptor;
 
 import com.sanye.strategy.infrastructure.redis.JtiBlacklistService;
 import com.sanye.strategy.infrastructure.security.JwtUtil;

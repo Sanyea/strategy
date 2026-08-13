@@ -1,4 +1,4 @@
-﻿package com.sanye.strategy.infrastructure.persistence.impl;
+package com.sanye.strategy.infrastructure.persistence.impl;
 
 import com.sanye.strategy.common.base.MpBaseServiceImpl;
 import com.sanye.strategy.common.util.BeanCopyUtils;

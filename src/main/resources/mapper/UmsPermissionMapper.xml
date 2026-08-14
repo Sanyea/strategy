@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sanye.strategy.infrastructure.persistence.mapper.UmsPermissionMapper">
+
+    <resultMap id="BaseResultMap" type="com.sanye.strategy.infrastructure.persistence.po.UmsPermissionPO">
+            <id property="id" column="id" />
+            <result property="parentId" column="parent_id" />
+            <result property="permissionName" column="permission_name" />
+            <result property="title" column="title" />
+            <result property="permissionType" column="permission_type" />
+            <result property="permissionCode" column="permission_code" />
+            <result property="routePath" column="route_path" />
+            <result property="componentPath" column="component_path" />
+            <result property="apiMethod" column="api_method" />
+            <result property="apiPath" column="api_path" />
+            <result property="icon" column="icon" />
+            <result property="sortOrder" column="sort_order" />
+            <result property="isFrame" column="is_frame" />
+            <result property="isCache" column="is_cache" />
+            <result property="isVisible" column="is_visible" />
+            <result property="status" column="status" />
+            <result property="isBuiltIn" column="is_built_in" />
+            <result property="requiresAuth" column="requires_auth" />
+            <result property="remark" column="remark" />
+            <result property="deleted" column="deleted" />
+            <result property="createUserId" column="create_user_id" />
+            <result property="updateUserId" column="update_user_id" />
+            <result property="createTime" column="create_time" />
+            <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,parent_id,permission_name,title,permission_type,permission_code,
+        route_path,component_path,api_method,api_path,icon,sort_order,
+        is_frame,is_cache,is_visible,status,is_built_in,requires_auth,remark,deleted,
+        create_user_id,update_user_id,create_time,update_time
+    </sql>
+</mapper>

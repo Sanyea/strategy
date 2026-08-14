@@ -2,6 +2,10 @@ package com.sanye.strategy.infrastructure.persistence.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.sanye.strategy.infrastructure.persistence.po.UmsUserLoginDevicePO;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.Collection;
+import java.util.List;
 
 /**
  * <p>
@@ -17,4 +21,11 @@ import com.sanye.strategy.infrastructure.persistence.po.UmsUserLoginDevicePO;
  */
 public interface UmsUserLoginDeviceMapper extends BaseMapper<UmsUserLoginDevicePO> {
 
+    /**
+     * 用户集活动会话（is_current=1 且未删除），供踢下线批量吊销
+     *
+     * @param userIds 用户ID集合
+     * @return 活动会话行列表
+     */
+    List<UmsUserLoginDevicePO> selectActiveSessionsByUserIds(@Param("userIds") Collection<Long> userIds);
 }

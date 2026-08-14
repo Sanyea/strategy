@@ -361,7 +361,7 @@ ALTER TABLE ums_user_login_device
   ADD KEY idx_refresh_token_hash (refresh_token_hash);     -- 刷新按 hash 查会话行
 ```
 
-> 注：新库建表见 `sql/user.sql`（`ums_user_login_device` 已含该列 + `idx_refresh_token_hash` + `idx_user_current`）；此为存量库升级用一次性 DDL。MySQL 8.0 不支持 `ADD COLUMN IF NOT EXISTS`，重复执行需人工判断。
+> 注：新库建表见 `sql/auth.sql`（`ums_user_login_device` 已含该列 + `idx_refresh_token_hash` + `idx_user_current`）；此为存量库升级用一次性 DDL。MySQL 8.0 不支持 `ADD COLUMN IF NOT EXISTS`，重复执行需人工判断。
 
 > **MFA 挑战凭证无 DDL**：tempToken 驻留 Redis（5min TTL 自动过期），不新增 DB 列、无迁移脚本（不同于 `refresh_token_hash` 需列）。实现勿误建列。
 

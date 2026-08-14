@@ -6,7 +6,6 @@ import com.sanye.strategy.domain.enums.GenderEnum;
 import com.sanye.strategy.domain.enums.IdCardStatusEnum;
 import com.sanye.strategy.domain.enums.RegisterChannelEnum;
 import com.sanye.strategy.domain.enums.UserStatusEnum;
-import com.sanye.strategy.domain.enums.UserTypeEnum;
 import com.sanye.strategy.domain.enums.YesNoEnum;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -94,11 +93,6 @@ public class UmsUserPO extends BasePO {
      * 实名认证状态 {@link IdCardStatusEnum}
      */
     private IdCardStatusEnum idCardStatus;
-
-    /**
-     * 用户类型 {@link UserTypeEnum}
-     */
-    private UserTypeEnum userType;
 
     /**
      * 账号状态 {@link UserStatusEnum}

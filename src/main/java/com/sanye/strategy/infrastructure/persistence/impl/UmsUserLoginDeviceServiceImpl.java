@@ -8,6 +8,10 @@ import com.sanye.strategy.infrastructure.persistence.po.UmsUserLoginDevicePO;
 import com.sanye.strategy.domain.user.repository.UmsUserLoginDeviceService;
 import org.springframework.stereotype.Service;
 
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * <p>
  * 用户登录设备 Service 实现 — 继承 {@link MpBaseServiceImpl}，桥接实体 {@link UmsUserLoginDevice} 与 PO {@link UmsUserLoginDevicePO}
@@ -28,5 +32,14 @@ public class UmsUserLoginDeviceServiceImpl extends MpBaseServiceImpl<UmsUserLogi
     @Override
     protected UmsUserLoginDevice toEntity(UmsUserLoginDevicePO po) {
         return BeanCopyUtils.copy(po, UmsUserLoginDevice.class);
+    }
+
+    @Override
+    public List<UmsUserLoginDevice> listActiveSessionsByUserIds(Collection<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<UmsUserLoginDevicePO> pos = baseMapper.selectActiveSessionsByUserIds(userIds);
+        return BeanCopyUtils.copyList(pos, UmsUserLoginDevice.class);
     }
 }

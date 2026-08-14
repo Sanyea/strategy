@@ -18,3 +18,15 @@ jwt:
   # 生产环境必须经环境变量 JWT_SECRET 覆盖（≥32 字节）；dev 默认值仅本地联调用，不入库不进代码
   secret: ${JWT_SECRET:dev-only-jwt-secret-0123456789abcdef0123456789abcdef}
   access-token-ttl-minutes: 30
+  # perms claim 体积上限：用户生效权限码超过该值 → safe-degrade 置空（宁拒勿越权，ERROR 告警）
+  perm-claim-max: 500
+
+rbac:
+  # 调试/主动失效接口全局开关（生产必须 false；关闭时 debug 接口 403 非 404，防暴露接口存在）
+  debug-enabled: true
+  # 自动 evict 同步/异步阈值：受影响用户数超过该值走异步任务注册表
+  evict-async-threshold: 50
+  # 角色到期扫描定时任务周期（分钟；只扫已过期绑定，兜底 token 有效期内角色到期安全窗口）
+  expiry-scan-interval-minutes: 1
+  # 启动是否执行权限扫描注册（只新增+复活，不做残留停用；发布流程强制手动 sync）
+  sync-on-startup: true

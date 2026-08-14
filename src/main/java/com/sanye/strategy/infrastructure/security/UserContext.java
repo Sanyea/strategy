@@ -1,6 +1,6 @@
 package com.sanye.strategy.infrastructure.security;
 
-import com.sanye.strategy.domain.enums.UserTypeEnum;
+import java.util.List;
 
 /**
  * <p>
@@ -10,6 +10,9 @@ import com.sanye.strategy.domain.enums.UserTypeEnum;
  * 由 {@code TokenAuthInterceptor} 在认证通过后填充，业务层经 {@link #get()} 取操作人；
  * 请求结束时（拦截器 {@code afterCompletion}）必须 {@link #clear()}，防止线程池复用导致上下文泄漏。
  * 无上下文时 {@link #get()} 返回 null，调用方按未登录处理或落库 NULL（后台脚本场景）。
+ * </p>
+ * <p>
+ * 角色：{@code roles} 为用户生效角色码列表（来自 accessToken roles claim，快照，零 DB 查询）。
  * </p>
  * <p>
  * 设计说明：
@@ -28,8 +31,11 @@ public class UserContext {
     /** 用户ID */
     private final Long userId;
 
-    /** 用户类型 */
-    private final UserTypeEnum userType;
+    /** 用户生效角色码列表（token 快照） */
+    private final List<String> roleCodes;
+
+    /** 用户生效权限码列表（token 快照，接口鉴权用） */
+    private final List<String> permCodes;
 
     /** 会话行 ID（jti，吊销黑名单键） */
     private final Long jti;
@@ -37,9 +43,10 @@ public class UserContext {
     /** 设备 ID */
     private final String deviceId;
 
-    public UserContext(Long userId, UserTypeEnum userType, Long jti, String deviceId) {
+    public UserContext(Long userId, List<String> roleCodes, List<String> permCodes, Long jti, String deviceId) {
         this.userId = userId;
-        this.userType = userType;
+        this.roleCodes = roleCodes;
+        this.permCodes = permCodes;
         this.jti = jti;
         this.deviceId = deviceId;
     }
@@ -60,8 +67,12 @@ public class UserContext {
         return userId;
     }
 
-    public UserTypeEnum getUserType() {
-        return userType;
+    public List<String> getRoleCodes() {
+        return roleCodes;
+    }
+
+    public List<String> getPermCodes() {
+        return permCodes;
     }
 
     public Long getJti() {

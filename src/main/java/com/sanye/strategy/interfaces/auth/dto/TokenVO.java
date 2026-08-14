@@ -9,7 +9,7 @@ import lombok.Data;
  * </p>
  * <p>
  * 客户端保存：accessToken 走内存/Header，refreshToken 走安全存储；
- * 不返回任何敏感字段（userId/userType 经 /users/me 获取）。
+ * 不返回任何敏感字段（userId/roles 经 /users/me 获取）。
  * </p>
  *
  * @author 31372

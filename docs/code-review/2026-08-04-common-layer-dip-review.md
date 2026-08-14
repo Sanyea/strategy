@@ -108,7 +108,7 @@
 
 ### 10. 逻辑删除 + 唯一键 → 标识永久占用
 
-- 文件：`sql/user.sql:41-43`
+- 文件：`sql/auth.sql:41-43`
 - 验证：CONFIRMED
 
 `@TableLogic` 逻辑删除只翻 `deleted=1`，行仍在表内；`uk_username`/`uk_phone`/`uk_email` 唯一键不区分。
@@ -121,7 +121,7 @@
 
 ### 11. 空手机号/邮箱撞唯一键
 
-- 文件：`sql/user.sql:42-43`
+- 文件：`sql/auth.sql:42-43`
 - 验证：CONFIRMED
 
 `phone DEFAULT ''`、`phone_country_code DEFAULT '+86'`、`email DEFAULT ''` + 唯一键。两个都不填手机号的用户 → DB 默认 `''` → 第二个插入报 `Duplicate entry for key 'uk_phone'`。
@@ -155,7 +155,7 @@
 
 ### 15. DATETIME 时区偏移
 
-- 文件：`sql/user.sql:38-39`
+- 文件：`sql/auth.sql:38-39`
 - 验证：PLAUSIBLE
 
 `create_time DATETIME DEFAULT CURRENT_TIMESTAMP` 写 DB 会话时区；JDBC URL 仅设 `serverTimezone=Asia/Shanghai`（不影响 DATETIME 读取）。若 DB 主机为 UTC → 落库 UTC 墙上时间 → 读回比北京时间慢 8 小时。需查 `@@time_zone` 确认主机时区。

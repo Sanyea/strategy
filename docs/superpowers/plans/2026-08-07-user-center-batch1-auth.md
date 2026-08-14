@@ -25,7 +25,7 @@
 
 1. **spec 4.3 白名单漏 `/auth/mfa/verify`**：MFA 二次验证发生在签发 token 之前、客户端无 accessToken，必须加入白名单。`WebMvcConfig` 白名单 = `/auth/login, /auth/register, /auth/refresh, /auth/mfa/verify, /actuator/**, /error`。
 2. **spec 5.2.1 `MfaVerifyDTO` 形状（挑战凭证反转后再定）**：`createSession` 需写 `ums_user_login_device.device_id`（NOT NULL），故 MFA 验证请求必须自带 `deviceInfo`（会话行落库 + 与挑战绑定 deviceId 比对）。结合本批设计反转（见下方纠偏 7），请求体 = `{tempToken, code, deviceInfo}`——去 `account`/`password`（userId 由挑战绑定解出，密码因子已在登录步骤 5 校验，tempToken 即证明）。
-3. **spec 8.3 与 `sql/user.sql` 不一致**：新库 `ums_user_login_device` 已含 `refresh_token_hash` + `idx_refresh_token_hash`，但缺 `idx_user_current (user_id, is_current)`。本批在 `user.sql` 补该索引，存量库经一次性迁移脚本补全部三处。
+3. **spec 8.3 与 `sql/auth.sql` 不一致**：新库 `ums_user_login_device` 已含 `refresh_token_hash` + `idx_refresh_token_hash`，但缺 `idx_user_current (user_id, is_current)`。本批在 `auth.sql` 补该索引，存量库经一次性迁移脚本补全部三处。
 4. **`UmsUserLoginDeviceMapper.xml` 缺 `refresh_token_hash` 映射**：实体/PO/列均已就绪，XML 的 `<resultMap>` 与 `Base_Column_List` 需补齐（CLAUDE.md：每个 Mapper 配 XML 结果映射）。
 5. **`DEVICE_KICKED(401)` 本批仅注册状态码**，拦截器黑名单命中一律抛 `TOKEN_EXPIRED`（登出语义）。`DEVICE_KICKED` 由批4 踢设备流程使用（届时黑名单 value 区分原因）。
 6. **不建独立 `RedisConfig` 类**：spec 批1 列了 `RedisConfig（Lettuce）`，但 `spring-boot-starter-data-redis` 自动装配已提供 `StringRedisTemplate`（Lettuce 默认），无自定义序列化需求，故省略（YAGNI）。Redis 连接参数在 `application-dev.yaml` 的 `spring.data.redis.*`，键前缀/命令封装在 `JtiBlacklistService`（键域 `jti:*`）与 `ChallengeTokenService`（键域 `mfa:*`，Task 8 新增）两个服务。
@@ -53,7 +53,7 @@
   ResultCode.java                                    7 个新状态码（含 MFA_CHALLENGE_EXPIRED）
   R.java / BizException.java / GlobalExceptionHandler.java  错误数据通道（R.fail data 重载 + BizException payload 透传）
   MybatisPlusConfig.java                             MetaObjectHandler 审计人填充（UserContext）
-  sql/user.sql                                       列宽放宽 / 默认 NULL / idx_user_current（存量迁移脚本已删，dev 库实测已具备结构）
+  sql/auth.sql                                       列宽放宽 / 默认 NULL / idx_user_current（存量迁移脚本已删，dev 库实测已具备结构）
   mapper/UmsUserLoginDeviceMapper.xml               refresh_token_hash 结果映射
   docs/superpowers/specs/2026-08-07-user-center-design.md  4.3 白名单 / 5.2.1 挑战凭证反转 / 8.3 一致性 / Redis 双用途
   CLAUDE.md                                          技术栈 Redis 双用途 / 包结构 / 待办表更新（收尾任务）
@@ -149,21 +149,21 @@ git commit -m "feat(auth): 批1 依赖与配置 — jjwt/jbcrypt/spring-data-red
 
 ---
 
-### Task 2: DDL — user.sql 同步 + login_device XML 映射
+### Task 2: DDL — auth.sql 同步 + login_device XML 映射
 
-> 注：原存量迁移脚本 `sql/migration/2026-08-07-batch1-auth.sql` 已删除——dev 库经冒烟实测已具备批1 结构（ums_user 列宽/NULL、login_device 列与索引），新库直接以 `user.sql` 建表。存量升级能力由批2+ 统一迁移方案承接。
+> 注：原存量迁移脚本 `sql/migration/2026-08-07-batch1-auth.sql` 已删除——dev 库经冒烟实测已具备批1 结构（ums_user 列宽/NULL、login_device 列与索引），新库直接以 `auth.sql` 建表。存量升级能力由批2+ 统一迁移方案承接。
 
 **Files:**
-- Modify: `sql/user.sql`
+- Modify: `sql/auth.sql`
 - Modify: `src/main/resources/mapper/UmsUserLoginDeviceMapper.xml`
 
 **Interfaces:**
 - Consumes: 无
 - Produces: `refresh_token_hash`/`idx_user_current` 列与索引（Task 10 `DeviceService` 查询按 `refresh_token_hash`）
 
-- [x] **Step 1: 同步 user.sql（新库建表）**
+- [x] **Step 1: 同步 auth.sql（新库建表）**
 
-`sql/user.sql` 的 `ums_user` 建表内三列宽与默认值改为：
+`sql/auth.sql` 的 `ums_user` 建表内三列宽与默认值改为：
 
 ```sql
   `username`             VARCHAR(120)     NOT NULL COMMENT '登录账号(唯一)',
@@ -196,8 +196,8 @@ git commit -m "feat(auth): 批1 依赖与配置 — jjwt/jbcrypt/spring-data-red
 - [x] **Step 3: Commit**
 
 ```bash
-git add sql/user.sql src/main/resources/mapper/UmsUserLoginDeviceMapper.xml
-git commit -m "feat(auth): 批1 DDL — 列宽放宽/空值NULL化/refresh_token_hash+索引，user.sql 与 login_device XML 同步"
+git add sql/auth.sql src/main/resources/mapper/UmsUserLoginDeviceMapper.xml
+git commit -m "feat(auth): 批1 DDL — 列宽放宽/空值NULL化/refresh_token_hash+索引，auth.sql 与 login_device XML 同步"
 ```
 
 ---
@@ -3470,7 +3470,7 @@ POST /auth/mfa/verify {tempToken, code, deviceInfo}
 
 （去 account/password；5.2 登录 mfa=1 分支签发 5min 挑战凭证随 403 MFA_REQUIRED 返回，verify GETDEL 单次消费 + 验 OTP）
 
-3. §8.3 注释改为「新库建表见 `sql/user.sql`（已含该列 + `idx_refresh_token_hash` + `idx_user_current`）」并在 ALTER 语句保留（存量库用）。
+3. §8.3 注释改为「新库建表见 `sql/auth.sql`（已含该列 + `idx_refresh_token_hash` + `idx_user_current`）」并在 ALTER 语句保留（存量库用）。
 
 - [x] **Step 2: CLAUDE.md 更新**
 

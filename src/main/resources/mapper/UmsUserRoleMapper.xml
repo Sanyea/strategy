@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sanye.strategy.infrastructure.persistence.mapper.UmsUserRoleMapper">
+
+    <select id="selectRoleCodesByUserId" resultType="java.lang.String">
+        SELECT r.role_code
+        FROM ums_user_role ur
+        INNER JOIN ums_role r ON r.id = ur.role_id
+        WHERE ur.user_id = #{userId}
+          AND r.deleted = 0
+          AND r.status = 1
+          AND (ur.begin_time IS NULL OR ur.begin_time &lt;= NOW())
+          AND (ur.end_time IS NULL OR ur.end_time &gt; NOW())
+        ORDER BY r.sort_order ASC
+    </select>
+
+    <select id="selectEffectiveByUserId" resultType="com.sanye.strategy.infrastructure.persistence.po.UmsUserRolePO">
+        SELECT ur.* FROM ums_user_role ur
+        INNER JOIN ums_role r ON r.id = ur.role_id
+        WHERE ur.user_id = #{userId} AND r.deleted = 0 AND r.status = 1
+          AND (ur.begin_time IS NULL OR ur.begin_time &lt;= NOW())
+          AND (ur.end_time IS NULL OR ur.end_time &gt; NOW())
+    </select>
+
+    <select id="selectExpired" resultType="com.sanye.strategy.infrastructure.persistence.po.UmsUserRolePO">
+        SELECT * FROM ums_user_role
+        WHERE end_time IS NOT NULL AND end_time &lt;= #{now}
+        ORDER BY end_time ASC, id ASC LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="selectExpiring" resultType="com.sanye.strategy.infrastructure.persistence.po.UmsUserRolePO">
+        SELECT * FROM ums_user_role
+        WHERE end_time IS NOT NULL AND end_time &lt;= #{horizon}
+        ORDER BY end_time ASC, id ASC LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="selectActiveUserIdsByRoleId" resultType="java.lang.Long">
+        SELECT DISTINCT ur.user_id FROM ums_user_role ur
+        INNER JOIN ums_user_login_device d ON d.user_id = ur.user_id AND d.is_current = 1 AND d.deleted = 0
+        WHERE ur.role_id = #{roleId}
+        ORDER BY ur.user_id ASC LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countUserIdsByRoleId" resultType="java.lang.Long">
+        SELECT COUNT(DISTINCT user_id) FROM ums_user_role WHERE role_id = #{roleId}
+    </select>
+
+    <update id="updateEndTimeById">
+        UPDATE ums_user_role SET end_time=#{endTime}, update_time=NOW() WHERE id=#{bindId}
+    </update>
+
+    <update id="updateEndTimeByUserRole">
+        UPDATE ums_user_role SET end_time=#{endTime}, update_time=NOW()
+        WHERE user_id=#{userId} AND role_id=#{roleId}
+    </update>
+
+    <delete id="deleteByUserId">
+        DELETE FROM ums_user_role WHERE user_id=#{userId}
+    </delete>
+
+    <delete id="deleteByUserAndRole">
+        DELETE FROM ums_user_role WHERE user_id=#{userId} AND role_id=#{roleId}
+    </delete>
+
+    <insert id="insertIgnoreBatch">
+        INSERT IGNORE INTO ums_user_role (id, user_id, role_id, begin_time, end_time, assigner_id, create_time, update_time)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.id}, #{item.userId}, #{item.roleId}, #{item.beginTime}, #{item.endTime}, #{item.assignerId}, NOW(), NOW())
+        </foreach>
+    </insert>
+
+</mapper>

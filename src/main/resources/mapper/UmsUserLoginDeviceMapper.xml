@@ -18,6 +18,8 @@
             <result property="expireTime" column="expire_time" />
             <result property="isCurrent" column="is_current" />
             <result property="refreshTokenHash" column="refresh_token_hash" />
+            <result property="loginType" column="login_type" />
+            <result property="loginChannel" column="login_channel" />
             <result property="deleted" column="deleted" />
             <result property="createTime" column="create_time" />
             <result property="updateTime" column="update_time" />
@@ -26,6 +28,12 @@
     <sql id="Base_Column_List">
         id,user_id,device_type,device_os,device_brand,device_model,
         device_id,app_version,login_ip,login_time,expire_time,
-        is_current,refresh_token_hash,deleted,create_time,update_time
+        is_current,refresh_token_hash,login_type,login_channel,deleted,create_time,update_time
     </sql>
+
+    <select id="selectActiveSessionsByUserIds" resultType="com.sanye.strategy.infrastructure.persistence.po.UmsUserLoginDevicePO">
+        SELECT * FROM ums_user_login_device
+        WHERE user_id IN (<foreach collection="userIds" item="id" separator=",">#{id}</foreach>)
+          AND is_current = 1 AND deleted = 0
+    </select>
 </mapper>

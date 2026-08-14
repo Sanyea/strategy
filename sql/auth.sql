@@ -19,9 +19,8 @@ CREATE TABLE if not exists `ums_user`
     `birthday`             DATE                      DEFAULT NULL COMMENT '出生日期',
     `id_card_no`           VARCHAR(64)               DEFAULT '' COMMENT '身份证号(加密存储)',
     `id_card_status`       TINYINT UNSIGNED          DEFAULT 0 COMMENT '实名认证状态 0-未认证 1-认证中 2-已认证 3-认证失败',
-    `user_type`            TINYINT UNSIGNED NOT NULL COMMENT '用户类型 1-普通用户 2-商家 3-运营 4-超级管理员',
     `user_status`          TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '账号状态 0-注销 1-正常 2-冻结 3-禁言',
-    `register_channel`     TINYINT UNSIGNED          DEFAULT 0 COMMENT '注册渠道 0-未知 1-APP 2-小程序 3-H5 4-PC 5-第三方授权',
+    `register_channel`     TINYINT UNSIGNED          DEFAULT 0 COMMENT '注册渠道 0-未知 1-APP 2-小程序 3-H5 4-PC 5-第三方授权（前端显式传，后端校验，当前仅 H5/PC）',
     `register_client_ip`   VARCHAR(64)               DEFAULT '' COMMENT '注册IP',
     `register_device_id`   VARCHAR(100)              DEFAULT '' COMMENT '注册设备ID',
     `last_login_time`      DATETIME                  DEFAULT NULL COMMENT '最后登录时间',
@@ -43,7 +42,6 @@ CREATE TABLE if not exists `ums_user`
     UNIQUE KEY `uk_phone` (`phone`, `phone_country_code`) COMMENT '手机号+国家码唯一',
     UNIQUE KEY `uk_email` (`email`),
     KEY `idx_user_status` (`user_status`),
-    KEY `idx_user_type` (`user_type`),
     KEY `idx_deleted` (`deleted`),
     KEY `idx_create_time` (`create_time`)
 ) ENGINE = InnoDB
@@ -85,6 +83,8 @@ CREATE TABLE if not exists `ums_user_login_device`
     `expire_time`         DATETIME                  DEFAULT NULL COMMENT 'Token过期时间',
     `is_current`          TINYINT UNSIGNED          DEFAULT 1 COMMENT '是否当前有效设备',
     `refresh_token_hash`  CHAR(64)                    DEFAULT NULL COMMENT 'refreshToken SHA-256 哈希（Hex，非明文）',
+    `login_type`          TINYINT UNSIGNED          DEFAULT 0 COMMENT '登入方式 0-未知 1-手机号 2-验证码 3-账号密码 4-第三方授权（前端显式传，后端校验，当前仅账号密码）',
+    `login_channel`       TINYINT UNSIGNED          DEFAULT 0 COMMENT '登录渠道 0-未知 1-APP 2-小程序 3-H5 4-PC 5-第三方授权（前端显式传，后端校验，当前仅 H5/PC）',
     `deleted`             TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '删除标识',
     `create_time`         DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time`         DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -95,6 +95,10 @@ CREATE TABLE if not exists `ums_user_login_device`
     KEY `idx_refresh_token_hash` (`refresh_token_hash`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='用户登录设备表';
+#
+# ALTER TABLE `ums_user_login_device`
+#     ADD COLUMN `login_type`    TINYINT UNSIGNED DEFAULT 0 COMMENT '登入方式 0-未知 1-手机号 2-验证码 3-账号密码 4-第三方授权（前端显式传，后端校验，当前仅账号密码）',
+#     ADD COLUMN `login_channel` TINYINT UNSIGNED DEFAULT 0 COMMENT '登录渠道 0-未知 1-APP 2-小程序 3-H5 4-PC 5-第三方授权（前端显式传，后端校验，当前仅 H5/PC）';
 
 CREATE TABLE if not exists `ums_user_auth`
 (

@@ -2,6 +2,8 @@ package com.sanye.strategy.domain.user.entity;
 
 import com.sanye.strategy.common.base.SimpleBaseEntity;
 import com.sanye.strategy.domain.enums.DeviceTypeEnum;
+import com.sanye.strategy.domain.enums.LoginTypeEnum;
+import com.sanye.strategy.domain.enums.RegisterChannelEnum;
 import com.sanye.strategy.domain.enums.YesNoEnum;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -81,4 +83,14 @@ public class UmsUserLoginDevice extends SimpleBaseEntity {
      * 刷新令牌 SHA-256 哈希（Hex，非明文）
      */
     private String refreshTokenHash;
+
+    /**
+     * 登入方式 {@link LoginTypeEnum}
+     */
+    private LoginTypeEnum loginType;
+
+    /**
+     * 登录渠道 {@link RegisterChannelEnum}
+     */
+    private RegisterChannelEnum loginChannel;
 }

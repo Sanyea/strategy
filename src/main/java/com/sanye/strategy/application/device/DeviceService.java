@@ -5,6 +5,8 @@ import com.sanye.strategy.common.util.HashUtil;
 import com.sanye.strategy.application.device.dto.DeviceInfo;
 import com.sanye.strategy.domain.user.entity.UmsUserLoginDevice;
 import com.sanye.strategy.domain.enums.DeviceTypeEnum;
+import com.sanye.strategy.domain.enums.LoginTypeEnum;
+import com.sanye.strategy.domain.enums.RegisterChannelEnum;
 import com.sanye.strategy.domain.enums.YesNoEnum;
 import com.sanye.strategy.domain.user.repository.UmsUserLoginDeviceService;
 import lombok.RequiredArgsConstructor;
@@ -71,10 +73,13 @@ public class DeviceService {
      * @param loginIp      登录 IP（服务端注入）
      * @param refreshToken 明文 refreshToken（仅此处哈希后落库）
      * @param ttlDays      refresh 有效期天数
+     * @param loginType    登入方式（注册/登录/MFA 会话均落，见 {@link LoginTypeEnum}；可 null 落 0）
+     * @param channel      登录渠道（前端显式传 + 后端校验后传入，见 {@link RegisterChannelEnum}；可 null 落 0）
      * @return 已落库会话实体（id 即 jti）
      */
     public UmsUserLoginDevice createSession(Long userId, DeviceInfo info, String loginIp,
-                                            String refreshToken, int ttlDays) {
+                                            String refreshToken, int ttlDays,
+                                            LoginTypeEnum loginType, RegisterChannelEnum channel) {
         UmsUserLoginDevice entity = new UmsUserLoginDevice();
         entity.setUserId(userId);
         entity.setDeviceType(info == null ? null : DeviceTypeEnum.valueOf(info.getDeviceType()));
@@ -88,6 +93,8 @@ public class DeviceService {
         entity.setExpireTime(LocalDateTime.now().plusDays(ttlDays));
         entity.setIsCurrent(YesNoEnum.YES);
         entity.setRefreshTokenHash(HashUtil.sha256Hex(refreshToken));
+        entity.setLoginType(loginType);
+        entity.setLoginChannel(channel);
         loginDeviceService.insert(entity);
         return entity;
     }

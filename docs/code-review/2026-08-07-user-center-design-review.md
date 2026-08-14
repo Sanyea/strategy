@@ -38,7 +38,7 @@
   - 代码日志簇（C1-C8，读 AbstractBaseService/MpBaseServiceImpl/CLAUDE.md/impl）
   - 认证设计簇（D1-D4/D8/D12/D13/D17，读 spec + ResultCode + GlobalExceptionHandler）
   - 会话属主簇（D9/D10/D15/D16/D20）
-  - 删号/DDL 簇（D5-D7/D11/D14/D18/D19，读 spec + sql/user.sql）
+  - 删号/DDL 簇（D5-D7/D11/D14/D18/D19，读 spec + sql/auth.sql）
 - 判定：CONFIRMED（引行 + 具体错误输出）/ PLAUSIBLE（机制真、触发不定）/ REFUTED（引证行证伪）
 - 召回模式：单个非 REFUTED 票即保留，不因不确定而丢弃
 
@@ -106,10 +106,10 @@
 
 - 文件：`docs/superpowers/specs/2026-08-07-user-center-design.md:106`
 - 验证：CONFIRMED（扫荡）
-- 摘要：refreshToken 定义为 SecureRandom 32B 不透明串「存会话行」，但 `ums_user_login_device`（sql/user.sql L72-93）与 `UmsUserLoginDevicePO` 无 token/哈希列，8 节 DDL 也未加
+- 摘要：refreshToken 定义为 SecureRandom 32B 不透明串「存会话行」，但 `ums_user_login_device`（sql/auth.sql L72-93）与 `UmsUserLoginDevicePO` 无 token/哈希列，8 节 DDL 也未加
 - 触发：`POST /auth/refresh {refreshToken, deviceId}` 服务端无列可比对，refresh 无法实现；或退化为可猜的 19 位行 id（违背 SecureRandom 32B），知道 id 即可铸会话
 - 修复建议：`ums_user_login_device` 加 `refresh_token_hash` 列（存哈希非明文），spec 补 DDL
-- 状态：✅ 已修复（2026-08-07）— `ums_user_login_device` 加 `refresh_token_hash CHAR(64)` + `idx_refresh_token_hash`（sql/user.sql）；UmsUserLoginDevice/PO 补字段；spec 8.3 补 DDL + 存量升级说明
+- 状态：✅ 已修复（2026-08-07）— `ums_user_login_device` 加 `refresh_token_hash CHAR(64)` + `idx_refresh_token_hash`（sql/auth.sql）；UmsUserLoginDevice/PO 补字段；spec 8.3 补 DDL + 存量升级说明
 
 ### 🔴 5. 「请求不打库」与逐请求 userStatus 查询矛盾（设计）
 

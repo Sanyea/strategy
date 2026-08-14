@@ -48,6 +48,48 @@ public final class BeanCopyUtils {
     }
 
     /**
+     * 复制源对象到目标类型新实例（忽略指定属性）
+     * <p>忽略列表典型用于排除不可变字段（主键 id、审计字段 createTime/updateTime、
+     * 框架标记 deleted）或业务禁改字段（内置标记 isBuiltIn、角色编码 roleCode 等），
+     * 等价于 Spring {@link BeanUtils#copyProperties(Object, Object, String...)}。</p>
+     *
+     * @param source           源对象
+     * @param targetType       目标类型
+     * @param ignoreProperties 需忽略复制的属性名（可为空）
+     * @param <S>              源类型
+     * @param <T>              目标类型
+     * @return 目标类型新实例，源为 null 返回 null
+     */
+    public static <S, T> T copy(S source, Class<T> targetType, String... ignoreProperties) {
+        if (source == null) {
+            return null;
+        }
+        T target = BeanUtils.instantiateClass(targetType);
+        BeanUtils.copyProperties(source, target, ignoreProperties);
+        return target;
+    }
+
+    /**
+     * 复制源对象属性到目标实例（忽略指定属性，返回目标便于链式调用）
+     * <p>原地复制不新建实例：适用于"先查询实体 → 用 DTO 覆盖可变字段"的更新语义，
+     * 忽略列表用于排除主键与审计/框架字段。</p>
+     *
+     * @param source           源对象
+     * @param target           目标实例（原地复制，不新建）
+     * @param ignoreProperties 需忽略复制的属性名（可为空）
+     * @param <S>              源类型
+     * @param <T>              目标类型
+     * @return 目标实例（与入参 {@code target} 相同）；source 或 target 为 null 返回 target
+     */
+    public static <S, T> T copy(S source, T target, String... ignoreProperties) {
+        if (source == null || target == null) {
+            return target;
+        }
+        BeanUtils.copyProperties(source, target, ignoreProperties);
+        return target;
+    }
+
+    /**
      * 复制列表到目标类型列表
      *
      * @param sources    源列表

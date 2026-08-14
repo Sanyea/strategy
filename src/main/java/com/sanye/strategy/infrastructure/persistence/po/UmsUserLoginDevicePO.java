@@ -3,6 +3,8 @@ package com.sanye.strategy.infrastructure.persistence.po;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.sanye.strategy.common.base.SimpleBasePO;
 import com.sanye.strategy.domain.enums.DeviceTypeEnum;
+import com.sanye.strategy.domain.enums.LoginTypeEnum;
+import com.sanye.strategy.domain.enums.RegisterChannelEnum;
 import com.sanye.strategy.domain.enums.YesNoEnum;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -83,4 +85,14 @@ public class UmsUserLoginDevicePO extends SimpleBasePO {
      * 刷新令牌 SHA-256 哈希（Hex，非明文）
      */
     private String refreshTokenHash;
+
+    /**
+     * 登入方式 {@link LoginTypeEnum}
+     */
+    private LoginTypeEnum loginType;
+
+    /**
+     * 登录渠道 {@link RegisterChannelEnum}
+     */
+    private RegisterChannelEnum loginChannel;
 }

@@ -1,5 +1,7 @@
 package com.sanye.strategy.infrastructure.redis;
 
+import com.sanye.strategy.domain.enums.LoginTypeEnum;
+import com.sanye.strategy.domain.enums.RegisterChannelEnum;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.stereotype.Service;
@@ -13,9 +15,10 @@ import java.util.HexFormat;
  * MFA 挑战凭证（tempToken）— Redis 短效一次性瞬态凭证
  * </p>
  * <p>
- * 登录 MFA 分支签发 32B 随机 tempToken，Redis {@code SETEX mfa:{tempToken} {userId}:{deviceId} ttl}（5min）；
+ * 登录 MFA 分支签发 32B 随机 tempToken，Redis {@code SETEX mfa:{tempToken} {userId}:{deviceId}:{loginType}:{channel} ttl}（5min）；
  * verify 时 {@code GETDEL} 原子单次消费（{@link ValueOperations#getAndDelete(Object)}）——命中即删，防重放/双消费竞态。
  * 记录随 TTL 自动过期，无手工清理。键域 {@code mfa:*} 与 {@link JtiBlacklistService}（{@code jti:*}）并列，Redis 双用途。
+ * 登入方式与登录渠道随挑战绑定携带（登录入口已校验），verifyMfa 建会话复用，不重复传参、不二次校验。
  * </p>
  * <p>
  * 设计说明：
@@ -44,12 +47,15 @@ public class ChallengeTokenService {
      *
      * @param userId     账号 ID（绑定，verify 时解出）
      * @param deviceId   设备 ID（绑定，verify 比对防跨设备）
+     * @param loginType  登入方式（登录入口已校验，verify 建会话复用；可 null 落 0）
+     * @param channel    登录渠道（登录入口已校验，verify 建会话复用；可 null 落 0）
      * @param ttlSeconds 存活秒数（本批 300 = 5min）
      * @return 32B hex tempToken（64 字符）
      */
-    public String issue(Long userId, String deviceId, int ttlSeconds) {
+    public String issue(Long userId, String deviceId, LoginTypeEnum loginType, RegisterChannelEnum channel, int ttlSeconds) {
         String token = generateToken();
-        redisTemplate.opsForValue().set(KEY_PREFIX + token, userId + ":" + deviceId, Duration.ofSeconds(ttlSeconds));
+        String value = userId + ":" + deviceId + ":" + code(loginType) + ":" + code(channel);
+        redisTemplate.opsForValue().set(KEY_PREFIX + token, value, Duration.ofSeconds(ttlSeconds));
         return token;
     }
 
@@ -57,19 +63,46 @@ public class ChallengeTokenService {
      * 原子单次消费挑战凭证（GETDEL）
      *
      * @param tempToken 挑战凭证
-     * @return 绑定信息（userId/deviceId）；null 表示已消费/过期/不存在
+     * @return 绑定信息（userId/deviceId/登入方式/渠道）；null 表示已消费/过期/不存在/旧格式（部署前签发）
      */
     public ChallengeBinding consume(String tempToken) {
         String value = redisTemplate.opsForValue().getAndDelete(KEY_PREFIX + tempToken);
         if (value == null) {
             return null;
         }
-        int separator = value.indexOf(':');
-        if (separator <= 0) {
+        // 格式 userId:deviceId:loginType:channel；deviceId 可含 ':'，首段=userId、末两段=码、中间段重建 deviceId
+        String[] parts = value.split(":");
+        if (parts.length < 4) {
             return null;
         }
         try {
-            return new ChallengeBinding(Long.parseLong(value.substring(0, separator)), value.substring(separator + 1));
+            Long userId = Long.parseLong(parts[0]);
+            StringBuilder deviceId = new StringBuilder(parts[1]);
+            for (int i = 2; i <= parts.length - 3; i++) {
+                deviceId.append(':').append(parts[i]);
+            }
+            return new ChallengeBinding(userId, deviceId.toString(),
+                    LoginTypeEnum.valueOf(safeInt(parts[parts.length - 2])),
+                    RegisterChannelEnum.valueOf(safeInt(parts[parts.length - 1])));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 枚举码转落串码，null 落 0 */
+    private static int code(LoginTypeEnum loginType) {
+        return loginType == null ? 0 : loginType.getCode();
+    }
+
+    /** 枚举码转落串码，null 落 0 */
+    private static int code(RegisterChannelEnum channel) {
+        return channel == null ? 0 : channel.getCode();
+    }
+
+    /** 安全解析整型，非法返回 null（不抛，交由 valueOf 兜底） */
+    private static Integer safeInt(String s) {
+        try {
+            return Integer.valueOf(s);
         } catch (NumberFormatException e) {
             return null;
         }
@@ -81,7 +114,8 @@ public class ChallengeTokenService {
         return HexFormat.of().formatHex(bytes);
     }
 
-    /** 挑战绑定信息（userId + deviceId） */
-    public record ChallengeBinding(Long userId, String deviceId) {
+    /** 挑战绑定信息（userId + deviceId + 登入方式 + 登录渠道） */
+    public record ChallengeBinding(Long userId, String deviceId,
+                                   LoginTypeEnum loginType, RegisterChannelEnum channel) {
     }
 }

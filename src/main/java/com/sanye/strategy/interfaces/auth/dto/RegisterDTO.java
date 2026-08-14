@@ -51,7 +51,12 @@ public class RegisterDTO {
     @Schema(description = "昵称（可选，缺省回落用户名）", example = "张三", maxLength = 50)
     private String nickname;
 
-    /** 设备信息（落库会话行 + 注册渠道推导） */
+    /** 注册渠道码，见 {@link com.sanye.strategy.domain.enums.RegisterChannelEnum}（前端显式传，后端校验，当前仅 H5/PC） */
+    @NotNull(message = "注册渠道不能为空")
+    @Schema(description = "注册渠道：3-H5 4-PC（当前仅开放这两个）", example = "4", allowableValues = {"3", "4"})
+    private Integer registerChannel;
+
+    /** 设备信息（落库会话行） */
     @Valid
     @NotNull(message = "设备信息不能为空")
     @Schema(description = "客户端设备信息")

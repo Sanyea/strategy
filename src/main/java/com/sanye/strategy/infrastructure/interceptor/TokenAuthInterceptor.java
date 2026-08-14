@@ -5,7 +5,6 @@ import com.sanye.strategy.infrastructure.security.JwtUtil;
 import com.sanye.strategy.infrastructure.security.UserContext;
 import com.sanye.strategy.common.exception.BizException;
 import com.sanye.strategy.common.response.ResultCode;
-import com.sanye.strategy.domain.enums.UserTypeEnum;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -15,6 +14,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.HandlerInterceptor;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * <p>
@@ -53,7 +55,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
  *     I->>I: type=ACCESS 校验
  *     I->>B: isRevoked(jti)
  *     B-->>I: false
- *     I->>I: UserContext.set(userId, userType, jti, deviceId)
+ *     I->>I: UserContext.set(userId, roles, perms, jti, deviceId)
  *     I-->>CT: true（放行）
  *     CT-->>I: 响应返回
  *     I->>I: afterCompletion → UserContext.clear()
@@ -90,15 +92,56 @@ public class TokenAuthInterceptor implements HandlerInterceptor {
                 throw new BizException(ResultCode.TOKEN_EXPIRED, "登录已失效，请重新登录");
             }
             Long userId = claims.get("userId", Number.class).longValue();
-            UserTypeEnum userType = UserTypeEnum.valueOf(claims.get("userType", Number.class).intValue());
+            List<String> roleCodes = parseRolesClaim(claims);
+            List<String> permCodes = parsePermsClaim(claims);
             String deviceId = claims.get("deviceId", String.class);
-            UserContext.set(new UserContext(userId, userType, jti, deviceId));
+            UserContext.set(new UserContext(userId, roleCodes, permCodes, jti, deviceId));
             return true;
         } catch (JwtException | IllegalArgumentException | NullPointerException e) {
             // 验签失败 / 算法不符 / 过期 / 签名合法但 claim 缺失或类型不符（非数值 jti、缺 userId 等）
             // 统一按 401 收敛，不落 500
             throw new BizException(ResultCode.UNAUTHORIZED, "登录已过期，请重新登录");
         }
+    }
+
+    /**
+     * 解析 roles claim（角色码数组，快照）
+     * <p>claim 缺失/非 List/元素非字符串一律防御为合法空角色（不抛异常，放行但无权），
+     * 非法结构仅代表旧 token 或篡改，交由业务鉴权拒绝，而非认证层 500。</p>
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> parseRolesClaim(Claims claims) {
+        Object roles = claims.get("roles");
+        if (!(roles instanceof List)) {
+            return List.of();
+        }
+        List<String> codes = new ArrayList<>();
+        for (Object item : (List<Object>) roles) {
+            if (item instanceof String s && !s.isBlank()) {
+                codes.add(s);
+            }
+        }
+        return codes;
+    }
+
+    /**
+     * 解析 perms claim（权限码数组，快照）
+     * <p>模式同 {@link #parseRolesClaim}：claim 缺失/非 List/元素非字符串一律防御为合法空列表
+     * （不抛异常，放行但无权），非法结构仅代表旧 token 或篡改，交由接口鉴权拒绝，而非认证层 500。</p>
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> parsePermsClaim(Claims claims) {
+        Object perms = claims.get("perms");
+        if (!(perms instanceof List)) {
+            return List.of();
+        }
+        List<String> codes = new ArrayList<>();
+        for (Object item : (List<Object>) perms) {
+            if (item instanceof String s && !s.isBlank()) {
+                codes.add(s);
+            }
+        }
+        return codes;
     }
 
     @Override

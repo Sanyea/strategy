@@ -36,6 +36,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **AI 开发与提交仅在 `AI` 分支进行**：代码编写、文件修改、`git commit` 一律在 `AI` 分支执行，禁止直接在 `dev`（及 `main`）分支开发或提交。
 - **合并到 `dev` 需用户确认**：`AI` 分支开发完成后，等待用户确认当前分支开发无误，再由 AI 将 `AI` 分支合并到 `dev`。
 - 合并后由用户决定是否删除 `AI` 分支或新建后续 `AI` 分支，AI 不擅自操作。
+- **严禁 AI 删除 git 分支**（任何分支，含 `AI`/`dev`/临时分支）：如需删除，必须先做备份（如建 `backup-*` 分支或打 tag）并经用户明确确认后方可执行。
 
 ## 构建与运行
 

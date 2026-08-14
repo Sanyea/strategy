@@ -1,0 +1,169 @@
+# Secret：存储ES账号密码
+apiVersion: v1
+kind: Secret
+metadata:
+  name: es-credential-secret
+  namespace: dev
+type: Opaque
+data:
+  elastic-user: ZWxhc3RpYzEyMzQ1Ng==
+  elastic-password: ZWxhc3RpYzEyMzQ1Ng==
+  kibana-system-user: a2liYW5hX3N5c3RlbQ==
+  kibana-system-password: a2liYW5hMTIzNDU2
+---
+# ElasticSearch Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch-dev
+  namespace: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch-dev
+  template:
+    metadata:
+      labels:
+        app: elasticsearch-dev
+    spec:
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9200
+              name: http
+            - containerPort: 9300
+              name: transport
+          env:
+            - name: TZ
+              value: Asia/Shanghai
+            - name: discovery.type
+              value: single-node
+            - name: ES_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+            - name: network.host
+              value: 0.0.0.0
+            - name: xpack.security.enabled
+              value: "true"
+            - name: xpack.security.enrollment.enabled
+              value: "false"
+            - name: xpack.security.http.ssl.enabled
+              value: "false"
+            - name: xpack.security.transport.ssl.enabled
+              value: "false"
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: es-credential-secret
+                  key: elastic-password
+            - name: KIBANA_SYSTEM_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: es-credential-secret
+                  key: kibana-system-password
+          volumeMounts:
+            - name: es-data
+              mountPath: /usr/share/elasticsearch/data
+      volumes:
+        - name: es-data
+          hostPath:
+            path: /data/dev/elasticsearch
+            type: DirectoryOrCreate
+---
+# ES Service NodePort
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch-dev-svc
+  namespace: dev
+spec:
+  type: NodePort
+  selector:
+    app: elasticsearch-dev
+  ports:
+    - port: 9200
+      targetPort: 9200
+      nodePort: 31200
+      name: http
+    - port: 9300
+      targetPort: 9300
+      nodePort: 31202
+      name: transport
+---
+# Kibana Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana-dev
+  namespace: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana-dev
+  template:
+    metadata:
+      labels:
+        app: kibana-dev
+    spec:
+      containers:
+        - name: kibana
+          image: docker.elastic.co/kibana/kibana:8.13.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5601
+              name: kibana-web
+          env:
+            - name: TZ
+              value: Asia/Shanghai
+            - name: ELASTICSEARCH_HOSTS
+              value: "http://elasticsearch-dev-svc:9200"
+            - name: I18N_LOCALE
+              value: zh-CN
+            # kibana后台对接ES使用 kibana_system / kibana123456
+            - name: ELASTICSEARCH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: es-credential-secret
+                  key: kibana-system-user
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: es-credential-secret
+                  key: kibana-system-password
+          volumeMounts:
+            - name: kibana-data
+              mountPath: /usr/share/kibana/data
+      volumes:
+        - name: kibana-data
+          hostPath:
+            path: /data/dev/kibana
+            type: DirectoryOrCreate
+---
+# Kibana Service NodePort
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana-dev-svc
+  namespace: dev
+spec:
+  type: NodePort
+  selector:
+    app: kibana-dev
+  ports:
+    - port: 5601
+      targetPort: 5601
+      nodePort: 31201
+      name: web
+
+#      访问信息
+#      ElasticSearch
+#      地址：http://节点IP:31200
+#      账号：elastic123456，密码：elastic123456
+#      Kibana 网页登录
+#      地址：http://节点IP:31201
+#      网页登录账号：elastic / elastic123456
+#      后台内部通信：kibana 容器使用 kibana_system / kibana123456 和 ES 交互，网页不能用 kibana_system 登录，这是 ES8 限制。
+

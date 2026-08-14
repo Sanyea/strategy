@@ -1,0 +1,254 @@
+# etcd secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: etcd-secret
+  namespace: dev
+type: Opaque
+data:
+  # 明文: etcd123456
+  root-password: ZXRjZDEyMzQ1Ng==
+---
+# minio secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-secret
+  namespace: dev
+type: Opaque
+data:
+  # 明文: minio123456
+  access-key: bWluaW8xMjM0NTY=
+  # 明文: miniosec123456
+  secret-key: bWluaW9zZWMxMjM0NTY=
+---
+# milvus secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: milvus-secret
+  namespace: dev
+type: Opaque
+data:
+  # 明文: milvus123456
+  root-password: bWlsdnVzMTIzNDU2
+---
+# etcd deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: milvus-etcd-dev
+  namespace: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: milvus-etcd-dev
+  template:
+    metadata:
+      labels:
+        app: milvus-etcd-dev
+    spec:
+      containers:
+        - name: etcd
+          image: quay.io/coreos/etcd:v3.5.25
+          imagePullPolicy: IfNotPresent
+          command:
+            - etcd
+            - "--name=etcd-0"
+            - "--data-dir=/etcd-data"
+            - "--listen-client-urls=http://0.0.0.0:2379"
+            - "--advertise-client-urls=http://milvus-etcd-dev:2379"
+            - "--listen-peer-urls=http://0.0.0.0:2380"
+          ports:
+            - containerPort: 2379
+              name: client
+            - containerPort: 2380
+              name: peer
+          env:
+            - name: ETCD_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: etcd-secret
+                  key: root-password
+          volumeMounts:
+            - name: etcd-data
+              mountPath: /etcd-data
+      volumes:
+        - name: etcd-data
+          hostPath:
+            path: /data/dev/milvus/etcd
+            type: DirectoryOrCreate
+---
+# etcd service ClusterIP
+apiVersion: v1
+kind: Service
+metadata:
+  name: milvus-etcd-dev
+  namespace: dev
+spec:
+  selector:
+    app: milvus-etcd-dev
+  ports:
+    - port: 2379
+      targetPort: 2379
+      name: client
+    - port: 2380
+      targetPort: 2380
+      name: peer
+---
+# minio deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: milvus-minio-dev
+  namespace: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: milvus-minio-dev
+  template:
+    metadata:
+      labels:
+        app: milvus-minio-dev
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+          imagePullPolicy: IfNotPresent
+          command: ["minio","server","/data"]
+          ports:
+            - containerPort: 9000
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: access-key
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: secret-key
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+      volumes:
+        - name: minio-data
+          hostPath:
+            path: /data/dev/milvus/minio
+            type: DirectoryOrCreate
+---
+# minio service ClusterIP
+apiVersion: v1
+kind: Service
+metadata:
+  name: milvus-minio-dev
+  namespace: dev
+spec:
+  selector:
+    app: milvus-minio-dev
+  ports:
+    - port: 9000
+      targetPort: 9000
+---
+# milvus deployment（使用外部etcd+minio，开启web‑ui端口）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: milvus-dev
+  namespace: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: milvus-dev
+  template:
+    metadata:
+      labels:
+        app: milvus-dev
+    spec:
+      containers:
+        - name: milvus
+          image: milvusdb/milvus:v2.6.18
+          imagePullPolicy: IfNotPresent
+          args:
+            - milvus
+            - run
+            - standalone
+          ports:
+            - containerPort: 19530
+              name: api-grpc
+            - containerPort: 9091
+              name: web-console
+          env:
+            - name: MILVUS_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: milvus-secret
+                  key: root-password
+            - name: MINIO_ADDRESS
+              value: milvus-minio-dev:9000
+            # 新增：Milvus 实际使用的环境变量名
+            - name: MINIO_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: access-key
+            - name: MINIO_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: secret-key
+            # 保留旧名称（兼容其他版本或镜像，非必需）
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: access-key
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secret
+                  key: secret-key
+            - name: MINIO_BUCKET_NAME
+              value: "milvus-bucket"
+            - name: MINIO_SECURE
+              value: "false"
+            - name: ETCD_ENDPOINTS
+              value: "milvus-etcd-dev:2379"
+            - name: ETCD_USE_EMBED
+              value: "false"
+            - name: ETCD_ROOT_PATH
+              value: "/milvus/dev"
+          volumeMounts:
+            - name: milvus-data
+              mountPath: /var/lib/milvus
+      volumes:
+        - name: milvus-data
+          hostPath:
+            path: /data/dev/milvus/milvus
+            type: DirectoryOrCreate
+---
+# milvus service NodePort对外：19530(api)、9091(web控制台)
+apiVersion: v1
+kind: Service
+metadata:
+  name: milvus-dev
+  namespace: dev
+spec:
+  type: NodePort
+  selector:
+    app: milvus-dev
+  ports:
+    - port: 19530
+      targetPort: 19530
+      nodePort: 30530
+      name: api-grpc
+    - port: 9091
+      targetPort: 9091
+      nodePort: 30091
+      name: web-console
+# SDK / 程序 API：宿主机IP:30530
+# Web 控制台浏览器：http://宿主机IP:30091，用户名 root，密码milvus123456

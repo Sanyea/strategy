@@ -1,161 +1,156 @@
+-- =============================================
+-- 1.雪花算法依赖表 & next_snowflake_id()函数
+-- =============================================
+DROP FUNCTION IF EXISTS next_snowflake_id;
 
-create database IF NOT EXISTS sys_strategy;
+CREATE TABLE IF NOT EXISTS `snowflake_seq` (
+                                               `worker_id` TINYINT UNSIGNED NOT NULL COMMENT '机器ID 0‑1023',
+                                               `last_timestamp` BIGINT UNSIGNED NOT NULL COMMENT '上一次生成ID的时间戳(ms)',
+                                               `sequence` INT UNSIGNED NOT NULL COMMENT '毫秒内序列号 0‑4095',
+                                               PRIMARY KEY (`worker_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='雪花算法序列号状态表';
 
-use sys_strategy;
+INSERT IGNORE INTO snowflake_seq(worker_id,last_timestamp,sequence) VALUES(0,UNIX_TIMESTAMP()*1000,0);
 
-CREATE TABLE IF NOT EXISTS `ums_role`
-(
-    `id`             BIGINT UNSIGNED  NOT NULL COMMENT '角色ID',
-    `role_code`      VARCHAR(100)     NOT NULL COMMENT '角色编码，如 SUPER_ADMIN',
-    `role_name`      VARCHAR(120)     NOT NULL COMMENT '角色名称',
-    `data_scope`     TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '数据权限范围：1-全部数据 2-仅本人数据 3-本部门数据(需部门表) 4-本部门及以下(需部门表) 5-自定义(需角色-数据域关联表)',
-    `sort_order`     INT UNSIGNED     NOT NULL DEFAULT 0 COMMENT '显示顺序',
-    `status`         TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '角色状态 0-停用 1-正常',
-    `is_built_in`    TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否内置角色 0-否 1-是，内置角色不允许删除',
-    `remark`         VARCHAR(500)     DEFAULT '' COMMENT '备注',
-    `deleted`        TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '删除标识 0-未删除 1-已删除',
-    `create_user_id` BIGINT UNSIGNED  DEFAULT NULL COMMENT '创建人ID',
-    `update_user_id` BIGINT UNSIGNED  DEFAULT NULL COMMENT '更新人ID',
-    `create_time`    DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `update_time`    DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`) USING BTREE,
-    UNIQUE KEY `uk_role_code` (`role_code`),
-    KEY `idx_status` (`status`),
-    KEY `idx_deleted` (`deleted`)
-) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4 COMMENT ='角色表';
+DELIMITER $$
+CREATE FUNCTION next_snowflake_id() RETURNS BIGINT UNSIGNED
+    DETERMINISTIC
+BEGIN
+    DECLARE v_worker_id TINYINT UNSIGNED DEFAULT 0;
+    DECLARE v_epoch BIGINT UNSIGNED DEFAULT 1609459200000; -- 2021‑01‑01 00:00:00(ms)
+    DECLARE v_now BIGINT UNSIGNED;
+    DECLARE v_last_ts BIGINT UNSIGNED;
+    DECLARE v_seq INT UNSIGNED;
+    DECLARE v_id BIGINT UNSIGNED;
 
-CREATE TABLE IF NOT EXISTS `ums_permission`
-(
-    `id`              BIGINT UNSIGNED  NOT NULL COMMENT '权限资源ID',
-    `parent_id`       BIGINT UNSIGNED  NOT NULL DEFAULT 0 COMMENT '父资源ID，0-根',
-    `permission_name` VARCHAR(100)     NOT NULL COMMENT '资源名称',
-    `title`           VARCHAR(200)     DEFAULT '' COMMENT '前端标题，菜单/目录展示用，可空',
-    `permission_type` TINYINT UNSIGNED NOT NULL COMMENT '资源类型：1-目录 2-菜单 3-按钮 4-接口',
-    `permission_code` VARCHAR(200)     DEFAULT NULL COMMENT '权限标识，如 system:user:create，按钮/接口使用，可空',
-    `route_path`      VARCHAR(200)     DEFAULT '' COMMENT '前端路由地址',
-    `component_path`  VARCHAR(255)     DEFAULT '' COMMENT '前端组件路径',
-    `api_method`      VARCHAR(10)      DEFAULT NULL COMMENT '接口请求方法 GET/POST/PUT/DELETE/PATCH',
-    `api_path`        VARCHAR(255)     DEFAULT NULL COMMENT '接口路径，如 /api/system/user',
-    `icon`            VARCHAR(100)     DEFAULT '' COMMENT '图标',
-    `sort_order`      INT UNSIGNED     NOT NULL DEFAULT 0 COMMENT '显示顺序',
-    `is_frame`        TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否外链 0-否 1-是',
-    `is_cache`        TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否缓存 0-否 1-是',
-    `is_visible`      TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '是否显示 0-隐藏 1-显示，按钮/接口忽略',
-    `status`          TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '资源状态 0-停用 1-正常',
-    `is_built_in`     TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否内置资源 0-否 1-是',
-    `requires_auth`   TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '是否需要权限控制 0-否 1-是，前端据此判断是否展示权限控制',
-    `remark`          VARCHAR(500)     DEFAULT '' COMMENT '备注，注解扫描自动注册时记录来源',
-    `deleted`         TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '删除标识 0-未删除 1-已删除',
-    `create_user_id`  BIGINT UNSIGNED  DEFAULT NULL COMMENT '创建人ID',
-    `update_user_id`  BIGINT UNSIGNED  DEFAULT NULL COMMENT '更新人ID',
-    `create_time`     DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `update_time`     DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`) USING BTREE,
-    UNIQUE KEY `uk_permission_code` (`permission_code`),
-    UNIQUE KEY `uk_api_method_path` (`api_method`, `api_path`),
-    KEY `idx_parent_id` (`parent_id`),
-    KEY `idx_permission_type` (`permission_type`),
-    KEY `idx_status` (`status`),
-    KEY `idx_deleted` (`deleted`)
-) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4 COMMENT ='权限资源表：目录/菜单/按钮/接口';
+    SET v_now = UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3)) * 1000;
 
--- 存量库升级：已存在 ums_permission 表补列（MySQL 无 ADD COLUMN IF NOT EXISTS，
--- 已加列后重复执行本句会报 Duplicate column——已加过请忽略该报错，其余语句仍可重复执行）
-ALTER TABLE `ums_permission`
-    ADD COLUMN `requires_auth` TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '是否需要权限控制 0-否 1-是，前端据此判断是否展示权限控制' AFTER `is_built_in`,
-    ADD COLUMN `title` VARCHAR(200) DEFAULT '' COMMENT '前端标题，菜单/目录展示用，可空' AFTER `permission_name`;
+    START TRANSACTION;
+    SELECT last_timestamp, sequence INTO v_last_ts, v_seq
+    FROM snowflake_seq WHERE worker_id = v_worker_id FOR UPDATE;
 
-CREATE TABLE IF NOT EXISTS `ums_user_role`
-(
-    `id`          BIGINT UNSIGNED NOT NULL COMMENT '主键ID',
-    `user_id`     BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
-    `role_id`     BIGINT UNSIGNED NOT NULL COMMENT '角色ID',
-    `begin_time`  DATETIME        DEFAULT NULL COMMENT '角色生效开始时间',
-    `end_time`    DATETIME        DEFAULT NULL COMMENT '角色生效结束时间',
-    `assigner_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '授权人ID',
-    `create_time` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `update_time` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`) USING BTREE,
-    UNIQUE KEY `uk_user_role` (`user_id`, `role_id`),
-    KEY `idx_role_id` (`role_id`)
-) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4 COMMENT ='用户-角色关联表，物理删除；续费/延长有效期经 UPDATE end_time 原地变更，审计走 ums_oper_log';
+    IF v_now < v_last_ts THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'next_snowflake_id: 系统时间回拨，无法生成雪花ID';
+    END IF;
 
-CREATE TABLE IF NOT EXISTS `ums_role_permission`
-(
-    `id`             BIGINT UNSIGNED NOT NULL COMMENT '主键ID',
-    `role_id`        BIGINT UNSIGNED NOT NULL COMMENT '角色ID',
-    `permission_id`  BIGINT UNSIGNED NOT NULL COMMENT '权限资源ID',
-    `grant_user_id`  BIGINT UNSIGNED DEFAULT NULL COMMENT '授权人ID',
-    `create_time`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `update_time`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`) USING BTREE,
-    UNIQUE KEY `uk_role_permission` (`role_id`, `permission_id`),
-    KEY `idx_permission_id` (`permission_id`)
-) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4 COMMENT ='角色-权限资源关联表，物理删除';
+    IF v_now = v_last_ts THEN
+        SET v_seq = v_seq + 1;
+        IF v_seq >= 4096 THEN
+            DO SLEEP(0.001);
+            SET v_now = UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3)) * 1000;
+            SET v_seq = 0;
+        END IF;
+    ELSE
+        SET v_seq = 0;
+    END IF;
 
--- 内置角色 seed（注册默认绑定 NORMAL_USER；uk_role_code 防重，可重复执行）
-INSERT IGNORE INTO `ums_role`
-    (`id`, `role_code`, `role_name`, `data_scope`, `sort_order`, `status`, `is_built_in`, `remark`,
-     `deleted`, `create_user_id`, `update_user_id`, `create_time`, `update_time`)
-VALUES
-    (1, 'SUPER_ADMIN', '超级管理员', 1, 1, 1, 1, '内置角色，全量数据权限，不可删除', 0, NULL, NULL, NOW(), NOW()),
-    (2, 'MERCHANT',     '商家',       2, 2, 1, 1, '内置角色，默认仅本人数据',       0, NULL, NULL, NOW(), NOW()),
-    (3, 'OPERATOR',     '运营',       2, 3, 1, 1, '内置角色，默认仅本人数据',       0, NULL, NULL, NOW(), NOW()),
-    (4, 'NORMAL_USER',  '普通用户',   2, 4, 1, 1, '内置角色，注册默认绑定，默认仅本人数据', 0, NULL, NULL, NOW(), NOW());
+    UPDATE snowflake_seq
+    SET last_timestamp = v_now, sequence = v_seq
+    WHERE worker_id = v_worker_id;
+    COMMIT;
+
+    SET v_id = ((v_now - v_epoch) << 22) | (v_worker_id << 12) | v_seq;
+    RETURN v_id;
+END$$
+DELIMITER ;
 
 -- =============================================
--- RBAC 菜单/绑定 seed（可重复执行）
--- 约定：INSERT IGNORE 防重；permission_id/role_id 一律按 code 动态取，禁止硬编码 ID。
+-- 2. 权限资源表 ums_permission 初始化：目录+菜单
+-- component_path 使用 @/views 别名；使用变量保存目录ID关联父子菜单
 -- =============================================
+-- 插入仪表盘目录
+INSERT INTO `ums_permission`
+(`id`, `parent_id`, `permission_name`, `title`, `permission_type`, `permission_code`, `route_path`, `component_path`, `api_method`, `api_path`, `icon`, `sort_order`, `is_frame`, `is_cache`, `is_visible`, `status`, `is_built_in`, `requires_auth`, `remark`, `deleted`, `create_user_id`, `update_user_id`)
+VALUES(next_snowflake_id(), 0, '仪表盘', '仪表盘', 1, NULL, '/dashboard', '', NULL, NULL, 'dashboard', 1, 0, 1, 1, 1, 1, 1, '系统内置目录', 0, NULL, NULL);
+SET @dashboard_id = LAST_INSERT_ID();
 
--- 1. rbac 目录 + 子菜单（权限码唯一，重复执行 INSERT IGNORE 跳过；存量库已有 rbac 目录则跳过）
-INSERT IGNORE INTO ums_permission
-(id, parent_id, permission_name, title, permission_type, permission_code, route_path, component_path,
- api_method, api_path, icon, sort_order, is_frame, is_cache, is_visible, status, is_built_in, requires_auth, remark,
- deleted, create_user_id, update_user_id, create_time, update_time)
+-- 插入RBAC权限管理目录
+INSERT INTO `ums_permission`
+(`id`, `parent_id`, `permission_name`, `title`, `permission_type`, `permission_code`, `route_path`, `component_path`, `api_method`, `api_path`, `icon`, `sort_order`, `is_frame`, `is_cache`, `is_visible`, `status`, `is_built_in`, `requires_auth`, `remark`, `deleted`, `create_user_id`, `update_user_id`)
+VALUES(next_snowflake_id(), 0, '权限管理', '权限管理', 1, NULL, '/rbac', '', NULL, NULL, 'permission', 2, 0, 1, 1, 1, 1, 1, '系统内置目录', 0, NULL, NULL);
+SET @rbac_id = LAST_INSERT_ID();
+
+-- 批量子菜单
+INSERT INTO `ums_permission`
+(`id`, `parent_id`, `permission_name`, `title`, `permission_type`, `permission_code`, `route_path`, `component_path`, `api_method`, `api_path`, `icon`, `sort_order`, `is_frame`, `is_cache`, `is_visible`, `status`, `is_built_in`, `requires_auth`, `remark`, `deleted`, `create_user_id`, `update_user_id`)
 VALUES
-    (UUID_SHORT(), 0, '权限管理', '权限管理', 1, 'rbac', '/rbac', NULL,
-     NULL, NULL, '', 0, 0, 0, 1, 1, 1, 1, 'RBAC 目录', 0, NULL, NULL, NOW(), NOW()),
-    (UUID_SHORT(), (SELECT id FROM ums_permission WHERE permission_code = 'rbac' LIMIT 1),
-     'Debug', 'Debug', 2, 'rbac:debug', '/rbac/debug', '@/views/rbac/debug/index.vue',
-     NULL, NULL, '', 1, 0, 0, 1, 1, 0, 1, 'Debug权限排查菜单', 0, NULL, NULL, NOW(), NOW()),
-    (UUID_SHORT(), (SELECT id FROM ums_permission WHERE permission_code = 'rbac' LIMIT 1),
-     'permission', '权限管理', 2, 'rbac:permission', '/rbac/permission', '@/views/rbac/permission/index.vue',
-     NULL, NULL, '', 2, 0, 0, 1, 1, 0, 1, '权限管理菜单', 0, NULL, NULL, NOW(), NOW()),
-    (UUID_SHORT(), (SELECT id FROM ums_permission WHERE permission_code = 'rbac' LIMIT 1),
-     'role', '角色管理', 2, 'rbac:role', '/rbac/role', '@/views/rbac/role/index.vue',
-     NULL, NULL, '', 3, 0, 0, 1, 1, 0, 1, '角色管理菜单', 0, NULL, NULL, NOW(), NOW());
+    (next_snowflake_id(), @dashboard_id, '工作台', '工作台', 2, 'dashboard:workspace', '/dashboard', '@/views/dashboard/index.vue', NULL, NULL, 'workspace', 0, 0, 1, 1, 1, 1, 1, '系统内置菜单', 0, NULL, NULL),
+    (next_snowflake_id(), @rbac_id, '权限调试', '权限调试', 2, 'rbac:debug', '/rbac/debug', '@/views/rbac/debug/index.vue', NULL, NULL, 'bug', 0, 0, 0, 1, 1, 1, 1, '系统内置菜单', 0, NULL, NULL),
+    (next_snowflake_id(), @rbac_id, '资源权限', '资源权限', 2, 'rbac:permission', '/rbac/permission', '@/views/rbac/permission/index.vue', NULL, NULL, 'tree', 1, 0, 1, 1, 1, 1, 1, '系统内置菜单', 0, NULL, NULL),
+    (next_snowflake_id(), @rbac_id, '角色管理', '角色管理', 2, 'rbac:role', '/rbac/role', '@/views/rbac/role/index.vue', NULL, NULL, 'role', 2, 0, 1, 1, 1, 1, 1, '系统内置菜单', 0, NULL, NULL);
 
--- 2. SUPER_ADMIN 绑定指定按钮/接口权限（按 permission_code 匹配；代码未注册时 SELECT 空集=无操作）
-INSERT IGNORE INTO `ums_role_permission` (`id`, `role_id`, `permission_id`, `grant_user_id`, `create_time`, `update_time`)
+-- =============================================
+-- 5.超级管理员 role_id=1 绑定权限：包含【目录权限】+菜单+接口权限
+-- 注意：仪表盘目录无permission_code，使用parent_id=0且permission_type=1、title='仪表盘'过滤获取目录ID
+-- =============================================
+INSERT IGNORE INTO `ums_role_permission` (`id`, `role_id`, `permission_id`, `grant_user_id`)
 SELECT
-    UUID_SHORT() AS id,
-    r.id AS role_id,
-    p.id AS permission_id,
-    NULL AS grant_user_id,
-    NOW() AS create_time,
-    NOW() AS update_time
-FROM `ums_role` r, `ums_permission` p
-WHERE r.role_code = 'SUPER_ADMIN'
-  AND p.permission_code IN ('system:rbac:debug:manage', 'system:permission:manage',
-                            'system:role:manage', 'system:role:assign', 'system:user:role:manage');
+    next_snowflake_id(),
+    1,
+    p.id,
+    NULL
+FROM `ums_permission` p
+WHERE
+    (
+        -- 仪表盘目录（无permission_code）
+        (p.parent_id = 0 AND p.permission_type = 1 AND p.title = '仪表盘')
+            OR
+            -- RBAC权限管理目录（无permission_code）
+        (p.parent_id = 0 AND p.permission_type = 1 AND p.title = '权限管理')
+            OR
+        p.permission_code IN (
+            -- Controller接口权限
+                              'system:rbac:debug:manage',
+                              'system:permission:manage',
+                              'system:role:manage',
+                              'system:role:assign',
+                              'system:user:role:manage',
+            -- 前端菜单权限
+                              'dashboard:workspace',
+                              'rbac:debug',
+                              'rbac:permission',
+                              'rbac:role'
+            )
+        ) AND p.deleted = 0;
 
--- 3. 内置角色绑定仪表盘目录/菜单（按 permission_code 动态取 id，避免硬编码 ID）
-INSERT IGNORE INTO ums_role_permission (id, role_id, permission_id, grant_user_id, create_time, update_time)
+-- =============================================
+-- 6.商家、运营、普通用户(role_id:2,3,4) 仅绑定仪表盘目录 + 工作台菜单
+-- =============================================
+INSERT IGNORE INTO `ums_role_permission` (`id`, `role_id`, `permission_id`, `grant_user_id`)
 SELECT
-    UUID_SHORT(), r.id, p.id, NULL, NOW(), NOW()
-FROM ums_role r, ums_permission p
-WHERE r.role_code IN ('SUPER_ADMIN', 'MERCHANT', 'OPERATOR', 'NORMAL_USER')
-  AND p.permission_code IN ('dashboard', 'dashboard:index');
+    next_snowflake_id(),
+    t.role_id,
+    p.id,
+    NULL
+FROM
+    (
+        SELECT 2 AS role_id UNION ALL
+        SELECT 3 AS role_id UNION ALL
+        SELECT 4 AS role_id
+    ) t
+        CROSS JOIN `ums_permission` p
+WHERE
+    (
+        -- 仪表盘目录
+        (p.parent_id = 0 AND p.permission_type = 1 AND p.title = '仪表盘')
+            OR
+        p.permission_code = 'dashboard:workspace'
+        )
+  AND p.deleted = 0;
 
--- 4. SUPER_ADMIN 绑定 rbac 子菜单权限（按 permission_code 动态取 id）
-INSERT IGNORE INTO ums_role_permission (id, role_id, permission_id, grant_user_id, create_time, update_time)
-SELECT
-    UUID_SHORT(), r.id, p.id, NULL, NOW(), NOW()
-FROM ums_role r, ums_permission p
-WHERE r.role_code = 'SUPER_ADMIN'
-  AND p.permission_code IN ('rbac', 'rbac:debug', 'rbac:permission', 'rbac:role');
+-- =============================================
+-- 校验SQL
+-- =============================================
+/*
+-- 查看超级管理员权限
+SELECT rp.role_id, p.permission_type, p.title, p.permission_code
+FROM ums_role_permission rp
+LEFT JOIN ums_permission p ON rp.permission_id = p.id
+WHERE rp.role_id = 1 ORDER BY rp.role_id,p.permission_type;
+
+-- 查看商家/运营/普通用户权限
+SELECT rp.role_id, p.permission_type, p.title, p.permission_code
+FROM ums_role_permission rp
+LEFT JOIN ums_permission p ON rp.permission_id = p.id
+WHERE rp.role_id IN (2,3,4) ORDER BY rp.role_id,p.permission_type;
+*/

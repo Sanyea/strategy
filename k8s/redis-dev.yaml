@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-dev
+  namespace: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-dev
+  template:
+    metadata:
+      labels:
+        app: redis-dev
+    spec:
+      containers:
+      - name: redis
+        image: docker.io/library/redis:7.2
+        imagePullPolicy: IfNotPresent
+        command:
+          - redis-server
+          - "--requirepass"
+          - "redis123456"
+          - "--appendonly"
+          - "yes"
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+      volumes:
+      - name: redis-data
+        hostPath:
+          path: /data/dev/redis
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-dev-nodeport
+  namespace: dev
+spec:
+  type: NodePort
+  selector:
+    app: redis-dev
+  ports:
+  - port: 6379
+    targetPort: 6379
+    nodePort: 30379

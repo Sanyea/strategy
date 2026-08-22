@@ -64,10 +64,17 @@ mvn spring-boot:run -Dspring-boot.run.profiles=test
 
 ## 技术栈
 
+> dev k8s 节点拓扑：node1 `192.168.109.130` — Kafka / MinIO / RabbitMQ / Redis；node2 `192.168.109.131` — ES / MySQL。下列端点按服务所在节点 IP 记录（NodePort 经任一节点 IP 亦可达）。
+
 - Java 21，Spring Boot 4.1.0，Maven
 - MyBatis-Plus 3.5.15（`com.baomidou:mybatis-plus-spring-boot4-starter`）— ORM，支持代码生成。**须用 boot4-starter 匹配 Spring Boot 4**：boot3-starter 的自动装配在 Boot 4 下 `@ConditionalOnSingleCandidate(DataSource)` 评估过早，SqlSessionFactory 不创建
-- MySQL，通过 `mysql-connector-j`
-- Redis（spring-data-redis + Lettuce）— 仅承载两类瞬态认证数据：accessToken jti 吊销黑名单（秒级冻结）+ MFA 挑战凭证 tempToken（5min TTL、GETDEL 单次消费），不承载会话/业务缓存
+- MySQL（dev 已接入 `application-dev.yaml`，通过 `mysql-connector-j`）— dev 连接 `192.168.109.131:30306`，库 `sys_strategy`，root 密码 `mysql123456`（k8s NodePort，清单 `k8s/mysql-dev.yaml`）
+- Redis（spring-data-redis + Lettuce，dev 已接入 `application-dev.yaml`）— dev 连接 `192.168.109.130:30379`，密码 `redis123456`（k8s NodePort，清单 `k8s/redis-dev.yaml`）；仅承载两类瞬态认证数据：accessToken jti 吊销黑名单（秒级冻结）+ MFA 挑战凭证 tempToken（5min TTL、GETDEL 单次消费），不承载会话/业务缓存
+- Kafka（已部署，代码未接入——pom 暂无 spring-kafka 依赖）— Bootstrap Server `192.168.109.130:31092`，安全协议 `SASL_PLAINTEXT`，SASL 机制 `SCRAM-SHA-256`，用户名 `user1`，密码 `8Ge87xaC6w`（接入时参照 `jwt.secret` 模式：dev 配置默认值 + 生产经 `KAFKA_PASSWORD` 环境变量覆盖，不入库不进代码）
+- Elasticsearch 8.13.4（已部署，代码未接入）— HTTP `192.168.109.131:31200`（node2），xpack 安全开启（HTTP/transport SSL 关闭），用户 `elastic` 密码 `elastic123456`；Kibana（zh-CN）`:30601`；单节点，清单 `k8s/es-kibana-dev.yaml` + `k8s/elasticsearch-dev-config.yaml`
+- MinIO（已部署，代码未接入）— S3 API `192.168.109.130:31000`，控制台 `:30001`，root 账号/密码 `minio123456`/`minio123456`，清单 `k8s/minio-dev.yaml`
+- Milvus v2.6.18（已部署，代码未接入）— standalone，gRPC NodePort `:30530`，WebUI `:30091`，root 密码 `milvus123456`（所在节点未确认，NodePort 经任一节点 IP 可达）；栈自带独立 etcd + 内部 MinIO（不与业务 MinIO 共用），清单 `k8s/milvus-stack-dev.yaml`
+- RabbitMQ 3.13-management（已部署，代码未接入）— AMQP `192.168.109.130:31672`，管理台 `:30672`，用户/密码 `rabbitmq123456`/`rabbitmq123456`，清单 `k8s/rabbitmq-dev.yaml`
 - JWT（jjwt 0.12.6）— accessToken HS256 对称签名（签发与验签均显式钉死 `Jwts.SIG.HS256`，不随密钥长度推断），密钥 ≥32 字节从 `jwt.secret` 注入（`application.yaml`，生产经 `JWT_SECRET` 环境变量覆盖，不入库不进代码），TTL 30min；`jti` claim 为 String（RFC 7519，jjwt 拒绝数值型 jti），`String.valueOf(jti)` 落串、消费方 `Long.valueOf(claims.get("jti", String.class))` 还原会话行 id
 - Lombok（maven-compiler-plugin 中配置了注解处理器）
 - Spring Boot Actuator，用于健康检查/监控端点
@@ -205,7 +212,7 @@ protected void beforeSaveOrUpdateBatch(Collection<T> list) {}  protected void af
 - 替换事务实现（JTA/Atomikos/Seata）只换 `PlatformTransactionManager` Bean 或覆写钩子；禁用则保持基类默认透传
 - 单元测试可直接实例化子类覆写钩子装假事务，无需启动 Spring
 
-**日志（暂移除）：** 模板方法操作汇总日志（原 `@Slf4j` `log.info` 8 条）暂整体移除——钩子抛错会丢日志、且与操作/审计职责重叠。后续统一设计「操作/审计日志」（实体 + 字段前后值 + 业务结果）与「请求/WEB 日志」（全局异常已带请求方法/URI）两套方案，见「已知缺陷与待办」。`AbstractBaseService` 现保持纯 POJO 零日志依赖。
+**日志（暂移除）：** 模板方法操作汇总日志（原 `@Slf4j` `log.info` 8 条）暂整体移除——钩子抛错会丢日志、且与操作/审计职责重叠。日志系统设计已定稿（`docs/superpowers/specs/2026-08-17-log-system-design.md`）：请求/WEB 日志走框架管道（产生端结构化 + Vector 采集 + 三轨存储），操作/审计日志走事件轨（字段 diff + target 元数据 + WORM 权威链）。**审计字段 diff 暂缓实现**（2026-08-23 评审决策，见 `docs/code-review/2026-08-23-rbac-review.md` 处置决策 1）：「改了什么」的追溯移交 web 日志层面（请求轨 + traceId 关联），`ums_oper_log` 维持动作级审计（谁在何时做了什么）；`DiffUtils`/`doGetOldSnapshot` 记档保留，待 web 日志阶段0 落地后复评。`AbstractBaseService` 保持纯 POJO 零日志依赖不变。
 
 #### MpBaseServiceImpl<P extends SimpleBasePO, M extends BaseMapper<P>, T extends SimpleBaseEntity>（common/base）
 
@@ -470,7 +477,7 @@ Mapper XML 文件位于 `src/main/resources/mapper/`。每个 Mapper 接口有�
 - `ums_user_auth` — 第三方登录绑定（继承 SimpleBaseEntity）
 - `ums_user_account_security` — 账号安全/密码/MFA（继承 SimpleBaseEntity）
 - `ums_user_login_device` — 登录设备追踪（继承 SimpleBaseEntity；`login_type` 登入方式 1-手机号 2-验证码 3-账号密码 4-第三方授权 + `login_channel` 登录渠道 0-未知 1-APP 2-小程序 3-H5 4-PC 5-第三方授权，前端显式传、后端白名单校验，当前仅 H5/PC 渠道 + 账号密码登入）
-- `ums_role` — 角色（继承 BaseEntity；低基数列 status/deleted 建索引为既有约定，不按规范删除；data_scope 5 级：1-全部 2-仅本人 3-本部门 4-本部门及以下 5-自定义，3/4/5 依赖后续部门/数据域表；rbac.sql 已 seed 4 个内置角色 SUPER_ADMIN/MERCHANT/OPERATOR/NORMAL_USER）
+- `ums_role` — 角色（继承 BaseEntity；低基数列 status/deleted 建索引为既有约定，不按规范删除；data_scope DDL 定义 5 级（1-全部 2-仅本人 3-本部门 4-本部门及以下 5-自定义），**当前无部门表，行为收窄为二分**：SUPER_ADMIN → 全部数据（ALL），其余角色 → 仅本人（SELF），3/4/5 级写入入口拒绝（2026-08-23 评审决策，见 `docs/code-review/2026-08-23-rbac-review.md` 处置决策 2；部门/数据域表落地时再恢复多级语义）；rbac.sql 已 seed 4 个内置角色 SUPER_ADMIN/MERCHANT/OPERATOR/NORMAL_USER）
 - `ums_permission` — 权限资源：目录/菜单/按钮/接口（继承 BaseEntity）
 - `ums_user_role` — 用户-角色关联（物理删除，无 deleted；续费经 UPDATE end_time 原地变更，不新建行，审计走 ums_oper_log）
 - `ums_role_permission` — 角色-权限资源关联（物理删除，无 deleted）
@@ -495,15 +502,17 @@ common 层 DIP 初版经代码审查发现若干缺陷，详见 `docs/code-revie
 | ✅ 已修复 | 比较/模糊操作符传 null → `= NULL` 永不匹配 | `DefaultQueryWrapper` | null 视为未提供，条件跳过（等价 MP `eq(boolean,...)` 空值防护） |
 | 🟠 | 逻辑删除 + 唯一键 → 标识永久占用 | `sql/auth.sql` | 删号后无法重注册用户名/手机号 |
 | 🟠 | `ums_user_profile.ext_info` JSON 列无类型处理器 | `UmsUserProfilePO` | 暂以 String 存取（JSON 文本）；MP 的 `JacksonTypeHandler` 基于 Jackson 2（`com.fasterxml.jackson.*`），Spring Boot 4 默认 Jackson 3（`tools.jackson.*`），命名空间不兼容，序列化策略待定 |
-| 🟠 暂缓 | 操作/审计日志（操作汇总 + 字段前后值 + 业务结果）+ 请求/WEB 日志统一设计 | `AbstractBaseService` + `MpBaseServiceImpl` + `GlobalExceptionHandler` | 现状：模板方法操作汇总日志已暂移除（见服务层「日志」）；字段级前后值需旧值，旧值仅桥接层可得。已评估字段级方案：A 模板快照钩子 `doGetOldSnapshot`（推荐，单行 diff）、B 桥接层 + `OperationLogger` 组件（可换审计表）、C AOP `@Audited`（违背 DIP 耦合收口，否决）。diff 语义：只报 new 非 null 且与 old 不同字段（兼容部分更新）。批量粒度与请求/WEB 日志方案待定 |
+| ✅ 已定稿 | 操作/审计日志 + 请求/WEB 日志统一设计 | 设计定稿见 `docs/superpowers/specs/2026-08-17-log-system-design.md` | 6 类日志 + 逻辑三轨·物理一 + 脱敏框架（双保险/剔除/掩码/IP 分级/单一配置源）+ 审计增强（字段 diff + target 元数据 + traceId + operator_type + WORM 权威链）。diff 语义：只报 new 非 null 且与 old 不同字段；凭据字段剔除记 `changed` 占位、PII 掩码保统计。**字段 diff 暂缓实现**（2026-08-23 评审决策）：移交 web 日志层面解决，`ums_oper_log` 维持动作级审计；`DiffUtils`/`doGetOldSnapshot` 记档保留待复评。阶段0（产生端：Tracing + logback 结构化分文件 + 脱敏）未实施 |
 | ✅ 已落地 | 认证主链批1（注册/登录/刷新/登出/MFA 挑战凭证验证 + jti 黑名单） | interfaces/auth + application/auth + application/device + infrastructure/security + infrastructure/redis + infrastructure/interceptor | 双 Token（JWT HS256 显式钉死 + 不透明 refresh 哈希）、TokenAuthInterceptor 白名单/责任链、Redis 双用途（`jti:*` + `mfa:*`）、`R.fail` data 重载 + `BizException` payload 通道、审计人填充（缺陷 5 已修复）。批2-6 状态不变 |
-| 📝 备忘 | RBAC 设计三注意事项（本期暂不处理，仅记档） | RBAC 批 + 文档 | ① 管理面过滤**硬编码** `create_user_id` 仅限 RBAC 角色/权限分页（谁创建看谁），**禁止**复用业务表——它与业务数据权限（DataScopeBuilder，data_scope 驱动）是两套机制，文档/注释/TODO 反复强调防误抄。② `POST /rbac/evict-batch` 批量踢异步任务本期**内存实现**（ConcurrentHashMap + 线程池 + taskId），服务重启正在执行的批量踢丢失——生产大批量变更需规避重启风险，后续落库（`ums_evict_task` 表 + 启动续跑）再升级。③ 功能权限与数据权限两模型生效差异：perms/roles 为 **JWT 快照**（变更经踢人或最长 30min accessToken TTL 生效，高敏变更必须踢人）；data_scope 为**实时**（每次请求 `UserContext.roleCodes` → 查 `ums_role.data_scope`，DB 查询即时生效）——开发文档 + 每个相关接口 javadoc 反复对比两模型，防混淆 |
+| 📝 备忘 | RBAC 设计三注意事项（本期暂不处理，仅记档） | RBAC 批 + 文档 | ① 管理面过滤**硬编码** `create_user_id` 仅限 RBAC 角色/权限分页（谁创建看谁），**禁止**复用业务表——它与业务数据权限（DataScopeBuilder，data_scope 驱动）是两套机制，文档/注释/TODO 反复强调防误抄。② `POST /rbac/evict-batch` 批量踢异步任务本期**内存实现**（ConcurrentHashMap + 线程池 + taskId），服务重启正在执行的批量踢丢失——生产大批量变更需规避重启风险，后续落库（`ums_evict_task` 表 + 启动续跑）再升级。③ 功能权限与数据权限两模型生效差异：perms/roles 为 **JWT 快照**（变更经踢人或最长 30min accessToken TTL 生效，高敏变更必须踢人）；data_scope 为**实时**（每次请求 `UserContext.roleCodes` → 查 `ums_role.data_scope`，DB 查询即时生效）——开发文档 + 每个相关接口 javadoc 反复对比两模型，防混淆。data_scope 当前收窄二分（SUPER_ADMIN=ALL / 其余=SELF，见评审报告处置决策 2） |
+| 🟠 | RBAC 评审待修复项（2026-08-23，见 `docs/code-review/2026-08-23-rbac-review.md`） | `application/rbac` + `infrastructure` | 5 项 Important：updateRole/updatePermission null 覆盖（BeanCopy 复制 null）；授角色不校验 roleId 存在 + assignRole 非幂等；`rbac.debug-enabled` 基础配置默认 true 应翻转为 false（dev 显式开）；evict TTL 兜底方向反（expireTime=null 回落 30min，应取会话剩余期）；过期 ums_user_role 绑定永不清理（定时任务只踢人不删行） |
 
 **新增代码注意事项：**
 - `saveOrUpdate` 已修复（沿继承链取主键）；批量方法经 `doInTransaction` 事务钩子执行并聚合逐行结果，事务收口于 `MpBaseServiceImpl`，`AbstractBaseService` 保持纯 POJO。
 - 复杂查询（OR/嵌套/select 投影）走 `IWrapper` 有效：`or()`/`nested(consumer)`/`and`/`apply`/`exists`/`notExists`/`select`/`last` 均已实现并映射到 MP。`or()` 无参数版本仅支持单层 OR 拼接，OR 组用 `nested(sub -> sub.eq(...).or().eq(...))`。
 - 设计模式类新增时必须补齐「角色说明 + 优缺点分析 + UML」三件套（CLAUDE.md 核心约束 2）。
-- 操作汇总日志已暂移除，操作/审计日志 + 请求/WEB 日志统一设计待方案确认（字段级 diff 推荐方向：模板快照钩子 `doGetOldSnapshot` + 纯 POJO `DiffUtils`），见待办表。
+- 日志系统设计已定稿：见 `docs/superpowers/specs/2026-08-17-log-system-design.md`。**审计字段 diff 暂缓实现**（2026-08-23 评审决策）：移交 web 日志层面解决（请求轨 + traceId 关联承担「改了什么」追溯），`ums_oper_log` 维持动作级审计；`DiffUtils`/`doGetOldSnapshot` 记档保留待复评。日志产生端改造（Micrometer Tracing + logback 结构化分文件 + 脱敏）为阶段0，待实施。
+- RBAC 评审（2026-08-23，`docs/code-review/2026-08-23-rbac-review.md`）两项决策已定稿：审计 diff 移交 web 日志层（处置决策 1）；data_scope 收窄二分——SUPER_ADMIN=ALL、其余=SELF，3/4/5 级写入入口拒绝，部门表落地再恢复多级（处置决策 2）。其余 5 项 Important 待修复项见待办表 🟠 行。
 - RBAC 三注意事项见待办表「📝 备忘」行：管理面 `create_user_id` 过滤禁止复用业务表；evict-batch 异步任务内存实现有重启丢失风险；功能权限快照 vs 数据权限实时两模型差异须文档/注释反复强调。
 - **发布运维步骤**：权限启动扫描只做新增/复活（残留停用保持 status=1），**发布后必须手动执行 `POST /rbac/permissions/sync` 停用残留**（spec 开发注意事项 3，防误停用）。
 

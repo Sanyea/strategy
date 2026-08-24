@@ -1,6 +1,7 @@
 package com.sanye.strategy.infrastructure.interceptor;
 
 import com.sanye.strategy.common.exception.BizException;
+import com.sanye.strategy.infrastructure.logging.SecurityEventLogger;
 import com.sanye.strategy.infrastructure.security.NoPermissionRequired;
 import com.sanye.strategy.infrastructure.security.RequiresPermission;
 import com.sanye.strategy.infrastructure.security.UserContext;
@@ -17,7 +18,7 @@ class PermissionInterceptorTest {
     private PermissionInterceptor interceptor;
 
     @BeforeEach void setUp() {
-        interceptor = new PermissionInterceptor();
+        interceptor = new PermissionInterceptor(mock(SecurityEventLogger.class));
         UserContext.clear();
     }
     @AfterEach void tearDown() { UserContext.clear(); }

@@ -24,6 +24,10 @@
           AND (ur.end_time IS NULL OR ur.end_time &gt; NOW())
     </select>
 
+    <select id="selectByUserRole" resultType="com.sanye.strategy.infrastructure.persistence.po.UmsUserRolePO">
+        SELECT * FROM ums_user_role WHERE user_id = #{userId} AND role_id = #{roleId} LIMIT 1
+    </select>
+
     <select id="selectExpired" resultType="com.sanye.strategy.infrastructure.persistence.po.UmsUserRolePO">
         SELECT * FROM ums_user_role
         WHERE end_time IS NOT NULL AND end_time &lt;= #{now}

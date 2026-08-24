@@ -92,6 +92,15 @@ public interface UmsUserRoleMapper extends BaseMapper<UmsUserRolePO> {
     int updateEndTimeById(@Param("bindId") Long bindId, @Param("endTime") LocalDateTime endTime);
 
     /**
+     * 按用户+角色查绑定行（单角色续期 diff 前置）
+     *
+     * @param userId 用户ID
+     * @param roleId 角色ID
+     * @return 绑定行，不存在返回 null
+     */
+    UmsUserRolePO selectByUserRole(@Param("userId") Long userId, @Param("roleId") Long roleId);
+
+    /**
      * 按用户+角色续期（end_time + update_time）
      *
      * @param userId  用户ID

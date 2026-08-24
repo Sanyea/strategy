@@ -7,14 +7,18 @@ import com.sanye.strategy.infrastructure.persistence.po.UmsOperLogPO;
 import com.sanye.strategy.infrastructure.security.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * <p>
@@ -47,6 +51,16 @@ public class OperLogService {
     private final UmsOperLogMapper operLogMapper;
 
     /**
+     * 审计权威链 logger — logback 路由 audit.log（阶段1 经 Vector → MinIO Object Lock WORM，规格 7.6）
+     */
+    private static final org.slf4j.Logger AUDIT_LOG = org.slf4j.LoggerFactory.getLogger("AUDIT");
+
+    /**
+     * 审计 JSON 序列化器 — Boot4 默认 Jackson 3（tools.jackson）
+     */
+    private static final ObjectMapper AUDIT_MAPPER = new ObjectMapper();
+
+    /**
      * 记录操作日志（REQUIRES_NEW 独立事务，异常吞掉降级不影响主流程）
      *
      * @param req 审计请求
@@ -57,6 +71,9 @@ public class OperLogService {
             tpl.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             tpl.executeWithoutResult(status -> {
                 UserContext ctx = UserContext.get();
+                // traceId 从 MDC 取（不信任调用方传，规格 7.3）；operatorType 逻辑推导（规格 7.4）
+                String traceId = MDC.get("traceId");
+                int operatorType = ctx == null ? 2 : 1;
                 UmsOperLogPO po = new UmsOperLogPO();
                 po.setUserId(ctx == null ? null : ctx.getUserId());
                 po.setUsername(ctx == null ? null : String.valueOf(ctx.getUserId()));
@@ -70,11 +87,45 @@ public class OperLogService {
                 po.setUserAgent(req.getUserAgent());
                 po.setStatus(req.isSuccess() ? 1 : 0);
                 po.setErrorMsg(req.getErrorMsg());
+                po.setTraceId(traceId);
+                po.setTargetEntity(req.getTargetEntity());
+                po.setTargetId(req.getTargetId());
+                po.setOperatorType(operatorType);
+                po.setChangeDiff(req.getChangeDiff());
                 po.setOperTime(LocalDateTime.now());
                 operLogMapper.insert(po);
+                writeAuditFile(po);
             });
         } catch (Exception e) {
             log.error("审计日志写入失败，降级不影响主流程", e);
+        }
+    }
+
+    /**
+     * 审计权威链双写：结构化 JSON 落 audit.log（视图副本之外的 WORM 源，规格 7.6）；
+     * 文件写失败仅记 error，不影响 DB 副本已落库的事实
+     */
+    private void writeAuditFile(UmsOperLogPO po) {
+        try {
+            Map<String, Object> audit = new LinkedHashMap<>();
+            audit.put("auditId", po.getId());
+            audit.put("traceId", po.getTraceId());
+            audit.put("userId", po.getUserId());
+            audit.put("operatorType", po.getOperatorType());
+            audit.put("module", po.getOperModule());
+            audit.put("action", po.getOperAction());
+            audit.put("targetEntity", po.getTargetEntity());
+            audit.put("targetId", po.getTargetId());
+            audit.put("operType", po.getOperType());
+            audit.put("ip", po.getOperIp());
+            audit.put("status", po.getStatus());
+            audit.put("changeDiff", po.getChangeDiff());
+            audit.put("desc", po.getOperDesc());
+            audit.put("errorMsg", po.getErrorMsg());
+            audit.put("operTime", po.getOperTime() == null ? null : po.getOperTime().toString());
+            AUDIT_LOG.info(AUDIT_MAPPER.writeValueAsString(audit));
+        } catch (Exception e) {
+            log.error("审计文件双写失败（DB 副本已落库）", e);
         }
     }
 

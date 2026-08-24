@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  日志阶段0 产生端配置（规格 docs/superpowers/specs/2026-08-17-log-system-design.md）：
+  - 结构化 JSON（logstash-logback-encoder 9.0）+ 分类分文件（6 类）+ 错误独立
+  - 脱敏产生端：MaskingJsonGeneratorDecorator 挂 CredentialValueMasker（凭据剔除）+ PiiValueMasker（PII 掩码）
+  - 逻辑三轨·物理一：request-*（ACCESS）/ business-*（root+MIDDLEWARE+ERROR）/ event-*（SECURITY+AUDIT）
+  - 业务只写本地文件：AsyncAppender 非阻塞（neverBlock），磁盘滚动清理（maxHistory+totalSizeCap）
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="strategy"/>
+    <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="./logs"/>
+
+    <!-- 分类文件 appender 模板：JSON 编码 + 双 ValueMasker 脱敏 + 按天滚动 + 总量上限 -->
+    <appender name="FILE_BUSINESS" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/business.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/business.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>200MB</maxFileSize>
+            <maxHistory>15</maxHistory>
+            <totalSizeCap>5GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"app":"${APP_NAME}","category":"business"}</customFields>
+            <decorator class="net.logstash.logback.mask.MaskingJsonGeneratorDecorator">
+                <valueMasker class="com.sanye.strategy.infrastructure.logging.CredentialValueMasker"/>
+                <valueMasker class="com.sanye.strategy.infrastructure.logging.PiiValueMasker"/>
+            </decorator>
+        </encoder>
+    </appender>
+
+    <appender name="FILE_ERROR" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/error.log</file>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>WARN</level>
+        </filter>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>200MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>5GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"app":"${APP_NAME}","category":"error"}</customFields>
+            <decorator class="net.logstash.logback.mask.MaskingJsonGeneratorDecorator">
+                <valueMasker class="com.sanye.strategy.infrastructure.logging.CredentialValueMasker"/>
+                <valueMasker class="com.sanye.strategy.infrastructure.logging.PiiValueMasker"/>
+            </decorator>
+        </encoder>
+    </appender>
+
+    <appender name="FILE_SECURITY" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/security.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/security.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>200MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"app":"${APP_NAME}","category":"security"}</customFields>
+            <!-- 事件轨：禁碰结构化敏感字段（规格 6.1/第九章）——不挂 ValueMasker，
+                 IP 分级等脱敏由产生端代码（SecurityEventLogger）完成 -->
+        </encoder>
+    </appender>
+
+    <appender name="FILE_AUDIT" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/audit.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/audit.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>200MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"app":"${APP_NAME}","category":"audit"}</customFields>
+            <!-- 事件轨：同 FILE_SECURITY，不挂 ValueMasker -->
+        </encoder>
+    </appender>
+
+    <appender name="FILE_ACCESS" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/access.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/access.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>200MB</maxFileSize>
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>5GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"app":"${APP_NAME}","category":"access"}</customFields>
+            <decorator class="net.logstash.logback.mask.MaskingJsonGeneratorDecorator">
+                <valueMasker class="com.sanye.strategy.infrastructure.logging.CredentialValueMasker"/>
+                <valueMasker class="com.sanye.strategy.infrastructure.logging.PiiValueMasker"/>
+            </decorator>
+        </encoder>
+    </appender>
+
+    <appender name="FILE_MIDDLEWARE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/middleware.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/middleware.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>200MB</maxFileSize>
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>2GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"app":"${APP_NAME}","category":"middleware"}</customFields>
+            <decorator class="net.logstash.logback.mask.MaskingJsonGeneratorDecorator">
+                <valueMasker class="com.sanye.strategy.infrastructure.logging.CredentialValueMasker"/>
+                <valueMasker class="com.sanye.strategy.infrastructure.logging.PiiValueMasker"/>
+            </decorator>
+        </encoder>
+    </appender>
+
+    <!-- 控制台（dev 可读性；JSON 同文件口径） -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"app":"${APP_NAME}"}</customFields>
+            <decorator class="net.logstash.logback.mask.MaskingJsonGeneratorDecorator">
+                <valueMasker class="com.sanye.strategy.infrastructure.logging.CredentialValueMasker"/>
+                <valueMasker class="com.sanye.strategy.infrastructure.logging.PiiValueMasker"/>
+            </decorator>
+        </encoder>
+    </appender>
+
+    <!-- 异步包装：业务永不阻塞（neverBlock=true，队列满丢弃并计数——日志至少留本地文件由同步 file appender 兜底的是事件轨；
+         请求/业务轨接受极端压力下丢弃，规格 1.3「业务永不阻塞」优先） -->
+    <appender name="ASYNC_BUSINESS" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>4096</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <appender-ref ref="FILE_BUSINESS"/>
+    </appender>
+    <appender name="ASYNC_ERROR" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>2048</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <appender-ref ref="FILE_ERROR"/>
+    </appender>
+    <!-- 事件轨同步写（低频高价值，不丢） -->
+    <appender name="ASYNC_SECURITY" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>1024</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <appender-ref ref="FILE_SECURITY"/>
+    </appender>
+    <appender name="ASYNC_AUDIT" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>1024</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <appender-ref ref="FILE_AUDIT"/>
+    </appender>
+    <appender name="ASYNC_ACCESS" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>4096</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <appender-ref ref="FILE_ACCESS"/>
+    </appender>
+    <appender name="ASYNC_MIDDLEWARE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>2048</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <appender-ref ref="FILE_MIDDLEWARE"/>
+    </appender>
+
+    <!-- 分类路由：logger 名 → 轨文件（additivity=false 防双写） -->
+    <logger name="SECURITY" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_SECURITY"/>
+    </logger>
+    <logger name="AUDIT" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_AUDIT"/>
+    </logger>
+    <logger name="ACCESS" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_ACCESS"/>
+    </logger>
+    <logger name="MIDDLEWARE" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_MIDDLEWARE"/>
+    </logger>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="ASYNC_BUSINESS"/>
+        <appender-ref ref="ASYNC_ERROR"/>
+    </root>
+</configuration>

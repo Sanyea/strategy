@@ -11,11 +11,13 @@ import com.sanye.strategy.domain.rbac.entity.UmsPermission;
 import com.sanye.strategy.domain.rbac.repository.UmsPermissionService;
 import com.sanye.strategy.domain.rbac.repository.UmsRolePermissionService;
 import com.sanye.strategy.domain.user.entity.UmsRole;
+import com.sanye.strategy.domain.user.entity.UmsUserRole;
 import com.sanye.strategy.domain.user.repository.UmsRoleService;
 import com.sanye.strategy.domain.user.repository.UmsUserRoleService;
 import com.sanye.strategy.infrastructure.security.UserContext;
 import com.sanye.strategy.interfaces.rbac.dto.UserRoleAssignDTO;
 import org.junit.jupiter.api.AfterEach;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -36,6 +38,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -254,5 +257,71 @@ class RbacManageServiceTest {
         verify(userRoleService).replaceRoles(eq(USER_ID), anyList(), eq(USER_ID));
         // 用户维度 evict（受影响用户=该用户）
         verify(evictService).evictUsers(List.of(USER_ID));
+    }
+
+    @Test
+    void updateRoleStatusRecordsStatusDiff() {
+        UmsRole r = role(10L);
+        when(roleService.getById(10L)).thenReturn(r);
+        when(userRoleService.countUserIdsByRoleId(10L)).thenReturn(1L);
+
+        facade.updateRoleStatus(10L, RoleStatusEnum.DISABLED);
+
+        // 写审计（带 diff）+ evict 审计（无 targetEntity）各一条，取写审计断言 diff
+        ArgumentCaptor<OperLogReq> captor = ArgumentCaptor.forClass(OperLogReq.class);
+        verify(operLogService, times(2)).record(captor.capture());
+        OperLogReq req = captor.getAllValues().stream()
+                .filter(rec -> rec.getTargetEntity() != null)
+                .findFirst().orElseThrow();
+        assertEquals("ums_role", req.getTargetEntity());
+        assertEquals(10L, req.getTargetId());
+        assertTrue(req.getChangeDiff().contains("\"field\":\"status\""));
+        assertTrue(req.getChangeDiff().contains("\"new\":\"0\""));
+    }
+
+    @Test
+    void replaceUserRolesRecordsRoleIdsSetDiff() {
+        UserRoleAssignDTO dto = new UserRoleAssignDTO();
+        dto.setRoleId(5L);
+        UmsUserRole existing = new UmsUserRole();
+        existing.setRoleId(3L);
+        existing.setUserId(USER_ID);
+        when(userRoleService.listEffectiveByUserId(USER_ID)).thenReturn(List.of(existing));
+
+        facade.replaceUserRoles(USER_ID, List.of(dto));
+
+        // 写审计（带 diff）+ evict 审计（无 targetEntity）各一条，取写审计断言 diff
+        ArgumentCaptor<OperLogReq> captor = ArgumentCaptor.forClass(OperLogReq.class);
+        verify(operLogService, times(2)).record(captor.capture());
+        OperLogReq req = captor.getAllValues().stream()
+                .filter(rec -> rec.getTargetEntity() != null)
+                .findFirst().orElseThrow();
+        assertEquals("ums_user_role", req.getTargetEntity());
+        assertEquals(USER_ID, req.getTargetId());
+        assertTrue(req.getChangeDiff().contains("\"op\":\"remove\""));
+        assertTrue(req.getChangeDiff().contains("\"ids\":[3]"));
+        assertTrue(req.getChangeDiff().contains("\"op\":\"add\""));
+        assertTrue(req.getChangeDiff().contains("\"ids\":[5]"));
+    }
+
+    @Test
+    void renewUserRoleRecordsEndTimeDiffWithBindIdTarget() {
+        UmsUserRole bind = new UmsUserRole();
+        bind.setId(77L);
+        bind.setUserId(USER_ID);
+        bind.setRoleId(10L);
+        bind.setEndTime(LocalDateTime.of(2026, 12, 31, 23, 59));
+        when(userRoleService.findByUserIdAndRoleId(USER_ID, 10L)).thenReturn(bind);
+        when(userRoleService.renew(USER_ID, 10L, LocalDateTime.of(2027, 12, 31, 23, 59))).thenReturn(true);
+
+        facade.renewUserRole(USER_ID, 10L, LocalDateTime.of(2027, 12, 31, 23, 59));
+
+        ArgumentCaptor<OperLogReq> captor = ArgumentCaptor.forClass(OperLogReq.class);
+        verify(operLogService).record(captor.capture());
+        OperLogReq req = captor.getValue();
+        assertEquals(77L, req.getTargetId());   // target = 绑定行 id（bindId，规格附录）
+        assertTrue(req.getChangeDiff().contains("\"field\":\"endTime\""));
+        assertTrue(req.getChangeDiff().contains("\"old\":\"2026-12-31T23:59\""));
+        assertTrue(req.getChangeDiff().contains("\"new\":\"2027-12-31T23:59\""));
     }
 }

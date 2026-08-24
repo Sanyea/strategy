@@ -30,3 +30,17 @@ rbac:
   expiry-scan-interval-minutes: 1
   # 启动是否执行权限扫描注册（只新增+复活，不做残留停用；发布流程强制手动 sync）
   sync-on-startup: true
+
+management:
+  tracing:
+    sampling:
+      # 阶段0 全采样（dev 排障优先；生产接入采集端后按需下调，规格 4.1 接入访问可采样）
+      probability: 1.0
+    propagation:
+      # W3C traceparent 传播（规格 2.2）
+      type: w3c
+
+logging:
+  file:
+    # logback-spring.xml 的 LOG_PATH 来源（k8s 部署时经环境变量 LOGGING_FILE_PATH 覆盖为 hostPath 挂载目录）
+    path: ./logs

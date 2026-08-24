@@ -2,6 +2,8 @@ package com.sanye.strategy.infrastructure.interceptor;
 
 import com.sanye.strategy.common.exception.BizException;
 import com.sanye.strategy.common.response.ResultCode;
+import com.sanye.strategy.common.util.IpUtils;
+import com.sanye.strategy.infrastructure.logging.SecurityEventLogger;
 import com.sanye.strategy.infrastructure.security.NoPermissionRequired;
 import com.sanye.strategy.infrastructure.security.RequiresPermission;
 import com.sanye.strategy.infrastructure.security.UserContext;
@@ -26,6 +28,12 @@ public class PermissionInterceptor implements HandlerInterceptor {
     private static final String RBAC_PATH_PREFIX = "/rbac/";
     private static final String SUPER_ADMIN = "SUPER_ADMIN";
 
+    private final SecurityEventLogger securityEventLogger;
+
+    public PermissionInterceptor(SecurityEventLogger securityEventLogger) {
+        this.securityEventLogger = securityEventLogger;
+    }
+
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         if (!(handler instanceof HandlerMethod method)) { return true; }
@@ -38,14 +46,19 @@ public class PermissionInterceptor implements HandlerInterceptor {
         if (requires == null) {
             String uri = request.getRequestURI();
             if (uri != null && uri.startsWith(RBAC_PATH_PREFIX)) {
+                securityEventLogger.log("authz", "anonymous", IpUtils.getClientIp(request), "DENY", "接口未配置权限点 uri=" + uri);
                 throw new BizException(ResultCode.FORBIDDEN, "接口未配置权限点");
             }
             return true;
         }
         UserContext ctx = UserContext.get();
-        if (ctx == null) { throw new BizException(ResultCode.UNAUTHORIZED); }
+        if (ctx == null) {
+            securityEventLogger.log("authz", "anonymous", IpUtils.getClientIp(request), "DENY", "无用户上下文访问受保护接口");
+            throw new BizException(ResultCode.UNAUTHORIZED);
+        }
         if (ctx.getRoleCodes().contains(SUPER_ADMIN)) { return true; }
         if (ctx.getPermCodes().contains(requires.value())) { return true; }
+        securityEventLogger.log("authz", String.valueOf(ctx.getUserId()), IpUtils.getClientIp(request), "DENY", "权限不足 perm=" + requires.value());
         throw new BizException(ResultCode.FORBIDDEN);
     }
 }

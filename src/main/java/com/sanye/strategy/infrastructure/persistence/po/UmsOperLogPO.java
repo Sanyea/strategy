@@ -128,6 +128,31 @@ public class UmsOperLogPO {
     private String errorMsg;
 
     /**
+     * 链路追踪ID（MDC traceId）
+     */
+    private String traceId;
+
+    /**
+     * 操作对象实体/表名
+     */
+    private String targetEntity;
+
+    /**
+     * 操作对象主键ID
+     */
+    private Long targetId;
+
+    /**
+     * 操作者类型：1-人工用户 2-系统任务
+     */
+    private Integer operatorType;
+
+    /**
+     * 字段变更 diff（JSON 数组字符串，规格 7.1；仅 INSERT，不参与脱敏——凭据剔除/PII 掩码已产生端完成）
+     */
+    private String changeDiff;
+
+    /**
      * 操作时间
      */
     private LocalDateTime operTime;

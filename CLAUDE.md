@@ -212,7 +212,7 @@ protected void beforeSaveOrUpdateBatch(Collection<T> list) {}  protected void af
 - 替换事务实现（JTA/Atomikos/Seata）只换 `PlatformTransactionManager` Bean 或覆写钩子；禁用则保持基类默认透传
 - 单元测试可直接实例化子类覆写钩子装假事务，无需启动 Spring
 
-**日志（暂移除）：** 模板方法操作汇总日志（原 `@Slf4j` `log.info` 8 条）暂整体移除——钩子抛错会丢日志、且与操作/审计职责重叠。日志系统设计已定稿（`docs/superpowers/specs/2026-08-17-log-system-design.md`）：请求/WEB 日志走框架管道（产生端结构化 + Vector 采集 + 三轨存储），操作/审计日志走事件轨（字段 diff + target 元数据 + WORM 权威链）。**审计字段 diff 暂缓实现**（2026-08-23 评审决策，见 `docs/code-review/2026-08-23-rbac-review.md` 处置决策 1）：「改了什么」的追溯移交 web 日志层面（请求轨 + traceId 关联），`ums_oper_log` 维持动作级审计（谁在何时做了什么）；`DiffUtils`/`doGetOldSnapshot` 记档保留，待 web 日志阶段0 落地后复评。`AbstractBaseService` 保持纯 POJO 零日志依赖不变。
+**日志（暂移除）：** 模板方法操作汇总日志（原 `@Slf4j` `log.info` 8 条）暂整体移除——钩子抛错会丢日志、且与操作/审计职责重叠。日志系统设计已定稿（`docs/superpowers/specs/2026-08-17-log-system-design.md`）：请求/WEB 日志走框架管道（产生端结构化 + Vector 采集 + 三轨存储），操作/审计日志走事件轨（字段 diff + target 元数据 + WORM 权威链）。**Web 日志正式进入实施，框架层面一切暂缓取消**（2026-08-23 用户决策）：阶段0（产生端：Tracing + logback 结构化分文件 + 脱敏 + 审计改造 + 安全事件埋点）执行计划定稿于 `docs/superpowers/plans/2026-08-23-log-phase0-producer.md`；**审计字段 diff 复活**（推翻 2026-08-23 评审处置决策 1）——`ums_oper_log` 增 `change_diff` 列，`DiffUtils` 纯 POJO diff + RBAC 管理面 9 类 UPDATE 门面就地 diff 随阶段0 一并落地（执行计划已扩充 diff 任务——Task 8 DiffUtils + Task 9 门面就地 diff，2026-08-24 已执行）。「改了什么」的结构化追溯回归审计轨，web 日志请求轨 + traceId 关联作为辅助链路并存。`AbstractBaseService` 保持纯 POJO 零日志依赖不变。
 
 #### MpBaseServiceImpl<P extends SimpleBasePO, M extends BaseMapper<P>, T extends SimpleBaseEntity>（common/base）
 
@@ -502,7 +502,7 @@ common 层 DIP 初版经代码审查发现若干缺陷，详见 `docs/code-revie
 | ✅ 已修复 | 比较/模糊操作符传 null → `= NULL` 永不匹配 | `DefaultQueryWrapper` | null 视为未提供，条件跳过（等价 MP `eq(boolean,...)` 空值防护） |
 | 🟠 | 逻辑删除 + 唯一键 → 标识永久占用 | `sql/auth.sql` | 删号后无法重注册用户名/手机号 |
 | 🟠 | `ums_user_profile.ext_info` JSON 列无类型处理器 | `UmsUserProfilePO` | 暂以 String 存取（JSON 文本）；MP 的 `JacksonTypeHandler` 基于 Jackson 2（`com.fasterxml.jackson.*`），Spring Boot 4 默认 Jackson 3（`tools.jackson.*`），命名空间不兼容，序列化策略待定 |
-| ✅ 已定稿 | 操作/审计日志 + 请求/WEB 日志统一设计 | 设计定稿见 `docs/superpowers/specs/2026-08-17-log-system-design.md` | 6 类日志 + 逻辑三轨·物理一 + 脱敏框架（双保险/剔除/掩码/IP 分级/单一配置源）+ 审计增强（字段 diff + target 元数据 + traceId + operator_type + WORM 权威链）。diff 语义：只报 new 非 null 且与 old 不同字段；凭据字段剔除记 `changed` 占位、PII 掩码保统计。**字段 diff 暂缓实现**（2026-08-23 评审决策）：移交 web 日志层面解决，`ums_oper_log` 维持动作级审计；`DiffUtils`/`doGetOldSnapshot` 记档保留待复评。阶段0（产生端：Tracing + logback 结构化分文件 + 脱敏）未实施 |
+| ✅ 已实施 | 操作/审计日志 + 请求/WEB 日志统一设计（阶段0 产生端 + 字段 diff） | 设计定稿见 `docs/superpowers/specs/2026-08-17-log-system-design.md` | 6 类日志 + 逻辑三轨·物理一 + 脱敏框架（双保险/剔除/掩码/IP 分级/单一配置源）+ 审计增强（字段 diff + target 元数据 + traceId + operator_type + WORM 权威链）。diff 语义：只报 new 非 null 且与 old 不同字段；凭据字段剔除记 `changed` 占位、PII 掩码保统计。**框架层面一切暂缓已取消**（2026-08-23 用户决策）：字段 diff 复活（推翻评审处置决策 1）——`ums_oper_log` 增 `change_diff` 列 + `DiffUtils` + RBAC 9 类 UPDATE 就地 diff；阶段0（产生端：Tracing + logback JSON 六类分文件 + 脱敏 + 审计 trace_id/target/operator_type + audit.log 双写 + 安全事件埋点）执行计划见 `docs/superpowers/plans/2026-08-23-log-phase0-producer.md`（diff 任务已扩充——Task 8 DiffUtils + Task 9 门面就地 diff 13 处，2026-08-24 已执行，2026-08-25 完成；2026-08-26 冒烟验证通过（7/7 用例），冒烟修复 3 项：Boot 4.1 无内置 tracing 自动装配须显式加 `spring-boot-micrometer-tracing-brave`（pom）、logback 9.0 `jsonGeneratorDecorator` 改名 `<decorator>`（logback-spring.xml）、`AuthService.increaseErrorCount` 误报 LOCKED/ip=null） |
 | ✅ 已落地 | 认证主链批1（注册/登录/刷新/登出/MFA 挑战凭证验证 + jti 黑名单） | interfaces/auth + application/auth + application/device + infrastructure/security + infrastructure/redis + infrastructure/interceptor | 双 Token（JWT HS256 显式钉死 + 不透明 refresh 哈希）、TokenAuthInterceptor 白名单/责任链、Redis 双用途（`jti:*` + `mfa:*`）、`R.fail` data 重载 + `BizException` payload 通道、审计人填充（缺陷 5 已修复）。批2-6 状态不变 |
 | 📝 备忘 | RBAC 设计三注意事项（本期暂不处理，仅记档） | RBAC 批 + 文档 | ① 管理面过滤**硬编码** `create_user_id` 仅限 RBAC 角色/权限分页（谁创建看谁），**禁止**复用业务表——它与业务数据权限（DataScopeBuilder，data_scope 驱动）是两套机制，文档/注释/TODO 反复强调防误抄。② `POST /rbac/evict-batch` 批量踢异步任务本期**内存实现**（ConcurrentHashMap + 线程池 + taskId），服务重启正在执行的批量踢丢失——生产大批量变更需规避重启风险，后续落库（`ums_evict_task` 表 + 启动续跑）再升级。③ 功能权限与数据权限两模型生效差异：perms/roles 为 **JWT 快照**（变更经踢人或最长 30min accessToken TTL 生效，高敏变更必须踢人）；data_scope 为**实时**（每次请求 `UserContext.roleCodes` → 查 `ums_role.data_scope`，DB 查询即时生效）——开发文档 + 每个相关接口 javadoc 反复对比两模型，防混淆。data_scope 当前收窄二分（SUPER_ADMIN=ALL / 其余=SELF，见评审报告处置决策 2） |
 | 🟠 | RBAC 评审待修复项（2026-08-23，见 `docs/code-review/2026-08-23-rbac-review.md`） | `application/rbac` + `infrastructure` | 5 项 Important：updateRole/updatePermission null 覆盖（BeanCopy 复制 null）；授角色不校验 roleId 存在 + assignRole 非幂等；`rbac.debug-enabled` 基础配置默认 true 应翻转为 false（dev 显式开）；evict TTL 兜底方向反（expireTime=null 回落 30min，应取会话剩余期）；过期 ums_user_role 绑定永不清理（定时任务只踢人不删行） |
@@ -511,8 +511,8 @@ common 层 DIP 初版经代码审查发现若干缺陷，详见 `docs/code-revie
 - `saveOrUpdate` 已修复（沿继承链取主键）；批量方法经 `doInTransaction` 事务钩子执行并聚合逐行结果，事务收口于 `MpBaseServiceImpl`，`AbstractBaseService` 保持纯 POJO。
 - 复杂查询（OR/嵌套/select 投影）走 `IWrapper` 有效：`or()`/`nested(consumer)`/`and`/`apply`/`exists`/`notExists`/`select`/`last` 均已实现并映射到 MP。`or()` 无参数版本仅支持单层 OR 拼接，OR 组用 `nested(sub -> sub.eq(...).or().eq(...))`。
 - 设计模式类新增时必须补齐「角色说明 + 优缺点分析 + UML」三件套（CLAUDE.md 核心约束 2）。
-- 日志系统设计已定稿：见 `docs/superpowers/specs/2026-08-17-log-system-design.md`。**审计字段 diff 暂缓实现**（2026-08-23 评审决策）：移交 web 日志层面解决（请求轨 + traceId 关联承担「改了什么」追溯），`ums_oper_log` 维持动作级审计；`DiffUtils`/`doGetOldSnapshot` 记档保留待复评。日志产生端改造（Micrometer Tracing + logback 结构化分文件 + 脱敏）为阶段0，待实施。
-- RBAC 评审（2026-08-23，`docs/code-review/2026-08-23-rbac-review.md`）两项决策已定稿：审计 diff 移交 web 日志层（处置决策 1）；data_scope 收窄二分——SUPER_ADMIN=ALL、其余=SELF，3/4/5 级写入入口拒绝，部门表落地再恢复多级（处置决策 2）。其余 5 项 Important 待修复项见待办表 🟠 行。
+- Web 日志正式实施（2026-08-23 用户决策，框架层面一切暂缓取消）：设计见 `docs/superpowers/specs/2026-08-17-log-system-design.md`，阶段0 执行计划见 `docs/superpowers/plans/2026-08-23-log-phase0-producer.md`（产生端：Micrometer Tracing + logback JSON 六类分文件 + 脱敏 + 审计 trace_id/target/operator_type + audit.log 双写 + 安全事件埋点）。**审计字段 diff 复活**（推翻 2026-08-23 评审处置决策 1）：`ums_oper_log` 增 `change_diff` 列，`DiffUtils` 转实施，RBAC 管理面 9 类 UPDATE 门面就地 diff（范围明细见 spec 附录）——阶段0 执行计划已扩充 diff 任务（2026-08-24：Task 8 DiffUtils + Task 9 门面就地 diff 13 处，含 9 类 UPDATE + 权限集 GRANT/REVOKE），已执行（2026-08-25）；2026-08-26 冒烟验证通过（Task 12 Step 1/2，7 用例全过）。冒烟发现并修复：Boot 4.1 无内置 tracing 自动装配——`micrometer-tracing-bridge-brave` 单独依赖不产出 traceId，须加 `spring-boot-micrometer-tracing-brave` 模块（pom 已改）；logback 9.0 `jsonGeneratorDecorator` 改名 `<decorator>`（logback-spring.xml 已改）；`AuthService.increaseErrorCount` 每错密误记 LOCKED 且 ip=null——已修为仅达阈值记 + 完整 IP。
+- RBAC 评审（2026-08-23，`docs/code-review/2026-08-23-rbac-review.md`）：处置决策 1（审计 diff 移交 web 日志层）**已被推翻**——2026-08-23 用户决策复活结构化 diff（见上一条）；处置决策 2 维持：data_scope 收窄二分——SUPER_ADMIN=ALL、其余=SELF，3/4/5 级写入入口拒绝，部门表落地再恢复多级。其余 5 项 Important 待修复项见待办表 🟠 行。
 - RBAC 三注意事项见待办表「📝 备忘」行：管理面 `create_user_id` 过滤禁止复用业务表；evict-batch 异步任务内存实现有重启丢失风险；功能权限快照 vs 数据权限实时两模型差异须文档/注释反复强调。
 - **发布运维步骤**：权限启动扫描只做新增/复活（残留停用保持 status=1），**发布后必须手动执行 `POST /rbac/permissions/sync` 停用残留**（spec 开发注意事项 3，防误停用）。
 
@@ -526,12 +526,3 @@ common 层 DIP 初版经代码审查发现若干缺陷，详见 `docs/code-revie
 - Controller 继承 `BaseController<XxxEntity, S extends IBaseService<XxxEntity>, Q, V>`，放 `interfaces/{能力}`；应用服务（门面/用例）放 `application/{能力}`
 
 新增表时，生成实体 + PO + mapper/service 三件套，根据表是否需要操作人审计决定继承 `SimpleBaseEntity`/`SimpleBasePO` 还是 `BaseEntity`/`BasePO`。
-
-## DDD 目录结构迁移（未执行代码迁移，仅文档先行）
-
-> 目录结构已按 DDD 分层重构目标更新于「包结构」章节。**实际代码文件尚未移动**——包声明、import、`@MapperScan`、`type-handlers-package`、XML namespace 均需按新结构同步调整后项目才能编译。迁移时必改点：
->
-> 1. `infrastructure/config/MybatisPlusConfig` 中 `@MapperScan("com.sanye.strategy.mapper")` → `com.sanye.strategy.infrastructure.persistence.mapper`
-> 2. `application.yaml` 中 `mybatis-plus.type-handlers-package: com.sanye.strategy.common.config` → `com.sanye.strategy.infrastructure.config`
-> 3. `src/main/resources/mapper/*.xml` 的 `<mapper namespace="com.sanye.strategy.mapper.XxxMapper">` → `com.sanye.strategy.infrastructure.persistence.mapper.XxxMapper`
-> 4. 所有移动类的 `package` 声明 + 引用方 `import` 随新路径调整

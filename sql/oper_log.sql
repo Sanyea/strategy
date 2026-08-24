@@ -23,12 +23,18 @@ CREATE TABLE IF NOT EXISTS `ums_oper_log`
     `user_agent`     VARCHAR(500)     DEFAULT '' COMMENT '浏览器UA',
     `status`         TINYINT UNSIGNED DEFAULT 1 COMMENT '操作结果 0-失败 1-成功',
     `error_msg`      TEXT             COMMENT '错误信息',
+    `trace_id`       VARCHAR(64)      DEFAULT '' COMMENT '链路追踪ID（MDC traceId，关联 ES 请求链路）',
+    `target_entity`  VARCHAR(64)      DEFAULT '' COMMENT '操作对象实体/表名（如 ums_role）',
+    `target_id`      BIGINT UNSIGNED  DEFAULT NULL COMMENT '操作对象主键ID',
+    `operator_type`  TINYINT UNSIGNED DEFAULT 2 COMMENT '操作者类型：1-人工用户（有 UserContext）2-系统任务（无 UserContext）',
+    `change_diff`    TEXT             COMMENT '字段变更 diff（JSON 数组字符串，规格 7.1；凭据剔除/PII 掩码已产生端完成）',
     `oper_time`      DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
     `create_time`    DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (`id`) USING BTREE,
     KEY `idx_user_id` (`user_id`),
     KEY `idx_oper_module` (`oper_module`),
     KEY `idx_status` (`status`),
-    KEY `idx_oper_time` (`oper_time`)
+    KEY `idx_oper_time` (`oper_time`),
+    KEY `idx_trace_id` (`trace_id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='操作日志表，仅插入，不物理更新，不逻辑删除';

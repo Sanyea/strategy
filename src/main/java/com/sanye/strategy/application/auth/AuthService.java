@@ -12,6 +12,7 @@ import com.sanye.strategy.infrastructure.security.JwtUtil;
 import com.sanye.strategy.infrastructure.security.PasswordEncoder;
 import com.sanye.strategy.infrastructure.security.TotpUtil;
 import com.sanye.strategy.infrastructure.security.UserContext;
+import com.sanye.strategy.infrastructure.logging.SecurityEventLogger;
 import com.sanye.strategy.common.base.DefaultQueryWrapper;
 import com.sanye.strategy.common.exception.BizException;
 import com.sanye.strategy.common.response.ResultCode;
@@ -125,6 +126,7 @@ public class AuthService {
     private final JtiBlacklistService jtiBlacklistService;
     private final ChallengeTokenService challengeTokenService;
     private final TransactionTemplate transactionTemplate;
+    private final SecurityEventLogger securityEventLogger;
 
     // ==================== 注册 ====================
 
@@ -143,7 +145,7 @@ public class AuthService {
         }
         String refreshToken = generateRefreshToken();
         UmsUser user = buildRegisterUser(dto, clientIp, channel);
-        return transactionTemplate.execute(status -> {
+        TokenVO vo = transactionTemplate.execute(status -> {
             userService.insert(user);
             initSecurity(user.getId());
             initProfile(user.getId());
@@ -155,6 +157,8 @@ public class AuthService {
             return issueTokens(user.getId(), loadRoleCodes(user.getId()), loadPermCodes(user.getId()),
                     session.getId(), session.getDeviceId(), refreshToken);
         });
+        securityEventLogger.log("authn", dto.getUsername(), clientIp, "REGISTER_OK", "注册成功");
+        return vo;
     }
 
     private UmsUser buildRegisterUser(RegisterDTO dto, String clientIp, RegisterChannelEnum channel) {
@@ -200,13 +204,15 @@ public class AuthService {
         RegisterChannelEnum channel = validateChannel(dto.getRegisterChannel());
         UmsUser user = findByAccount(dto.getAccount(), loginType);
         if (user == null) {
+            securityEventLogger.log("authn", dto.getAccount(), clientIp, "FAIL", "账号不存在");
             throw new BizException(ResultCode.UNAUTHORIZED, INVALID_ACCOUNT_MESSAGE);
         }
-        checkUserStatus(user);
+        checkUserStatus(user, clientIp);
         UmsUserAccountSecurity security = loadOrCreateSecurity(user.getId());
-        checkLocked(security);
+        checkLocked(security, user.getId(), clientIp);
         if (!passwordEncoder.matches(dto.getPassword(), user.getPassword())) {
-            increaseErrorCount(security);
+            increaseErrorCount(security, clientIp);
+            securityEventLogger.log("authn", dto.getAccount(), clientIp, "FAIL", "密码错误");
             throw new BizException(ResultCode.UNAUTHORIZED, INVALID_ACCOUNT_MESSAGE);
         }
         if (YesNoEnum.YES.equals(security.getMfaStatus())) {
@@ -217,10 +223,11 @@ public class AuthService {
             MfaChallengeVO challenge = new MfaChallengeVO();
             challenge.setTempToken(tempToken);
             challenge.setExpiresIn(CHALLENGE_TTL_SECONDS);
+            securityEventLogger.log("authn", dto.getAccount(), clientIp, "MFA_CHALLENGE", "MFA 挑战签发");
             throw new BizException(ResultCode.MFA_REQUIRED, "请完成二次验证", challenge);
         }
         String refreshToken = generateRefreshToken();
-        return transactionTemplate.execute(status -> {
+        TokenVO vo = transactionTemplate.execute(status -> {
             clearErrorCount(security);
             UmsUserLoginDevice session = deviceService.createSession(
                     user.getId(), dto.getDeviceInfo(), clientIp, refreshToken, REFRESH_TOKEN_TTL_DAYS,
@@ -229,6 +236,8 @@ public class AuthService {
             return issueTokens(user.getId(), loadRoleCodes(user.getId()), loadPermCodes(user.getId()),
                     session.getId(), session.getDeviceId(), refreshToken);
         });
+        securityEventLogger.log("authn", dto.getAccount(), clientIp, "SUCCESS", "登录成功");
+        return vo;
     }
 
     /**
@@ -241,10 +250,12 @@ public class AuthService {
         // 1. GETDEL 原子单次消费挑战凭证（不存在/已消费/过期 → null）
         ChallengeTokenService.ChallengeBinding binding = challengeTokenService.consume(dto.getTempToken());
         if (binding == null) {
+            securityEventLogger.log("authn", "unknown", clientIp, "FAIL", "MFA 挑战过期或已消费");
             throw new BizException(ResultCode.MFA_CHALLENGE_EXPIRED);
         }
         // 2. 绑定 deviceId 与请求比对（防跨设备复用）
         if (!binding.deviceId().equals(dto.getDeviceInfo().getDeviceId())) {
+            securityEventLogger.log("authn", String.valueOf(binding.userId()), clientIp, "FAIL", "MFA 挑战设备不符");
             throw new BizException(ResultCode.MFA_CHALLENGE_EXPIRED, "挑战凭证与当前设备不符");
         }
         // 3. 按 userId 查用户（防御分支，挑战签发时已验存在）
@@ -253,15 +264,16 @@ public class AuthService {
             throw new BizException(ResultCode.UNAUTHORIZED, INVALID_ACCOUNT_MESSAGE);
         }
         UmsUserAccountSecurity security = loadOrCreateSecurity(user.getId());
-        checkLocked(security);      // 4. lockTime 防御复检（签发后 5min 内可被锁）
-        checkUserStatus(user);      // 5. 状态复检（签发后 5min 内可变）
+        checkLocked(security, user.getId(), clientIp);      // 4. lockTime 防御复检（签发后 5min 内可被锁）
+        checkUserStatus(user, clientIp);      // 5. 状态复检（签发后 5min 内可变）
         if (!totpUtil.verify(security.getMfaSecret(), dto.getCode())) {   // 6. OTP 因子
             // 与密码共用防爆破：错 5 次锁 30min；挑战已消费，重试须重新登录
-            increaseErrorCount(security);
+            increaseErrorCount(security, clientIp);
+            securityEventLogger.log("authn", user.getUsername(), clientIp, "FAIL", "MFA 验证码错误");
             throw new BizException(ResultCode.UNAUTHORIZED, "验证码错误");
         }
         String refreshToken = generateRefreshToken();
-        return transactionTemplate.execute(status -> {
+        TokenVO vo = transactionTemplate.execute(status -> {
             clearErrorCount(security);
             // 登入方式/渠道取挑战绑定（登录入口已校验），防御 null 落 UNKNOWN
             UmsUserLoginDevice session = deviceService.createSession(
@@ -272,6 +284,8 @@ public class AuthService {
             return issueTokens(user.getId(), loadRoleCodes(user.getId()), loadPermCodes(user.getId()),
                     session.getId(), session.getDeviceId(), refreshToken);
         });
+        securityEventLogger.log("authn", user.getUsername(), clientIp, "SUCCESS", "MFA 验证成功");
+        return vo;
     }
 
     // ==================== 刷新 ====================
@@ -283,24 +297,29 @@ public class AuthService {
         String oldRefreshTokenHash = com.sanye.strategy.common.util.HashUtil.sha256Hex(dto.getRefreshToken());
         UmsUserLoginDevice session = deviceService.findByRefreshTokenHash(oldRefreshTokenHash);
         if (session == null || !dto.getDeviceId().equals(session.getDeviceId())) {
+            securityEventLogger.log("authn", session == null ? "unknown" : String.valueOf(session.getUserId()), null, "FAIL", "refresh 会话已失效");
             throw new BizException(ResultCode.TOKEN_EXPIRED, "会话已失效，请重新登录");
         }
         if (session.getExpireTime() != null && LocalDateTime.now().isAfter(session.getExpireTime())) {
+            securityEventLogger.log("authn", String.valueOf(session.getUserId()), null, "FAIL", "refresh 会话已过期");
             throw new BizException(ResultCode.TOKEN_EXPIRED, "会话已过期，请重新登录");
         }
         if (jtiBlacklistService.isRevoked(session.getId())) {
+            securityEventLogger.log("authn", String.valueOf(session.getUserId()), null, "FAIL", "refresh 会话已吊销");
             throw new BizException(ResultCode.TOKEN_EXPIRED, "会话已吊销，请重新登录");
         }
         UmsUser user = userService.getById(session.getUserId());
         if (user == null) {
+            securityEventLogger.log("authn", "unknown", null, "FAIL", "refresh 会话已失效");
             throw new BizException(ResultCode.TOKEN_EXPIRED);
         }
-        checkUserStatus(user);
+        checkUserStatus(user, null);
         String newRefreshToken = generateRefreshToken();
         // 条件轮换：并发同令牌双刷时，后到者因哈希不匹配返回 false，视为会话已被轮换失效
         boolean rotated = deviceService.rotateRefreshToken(
                 session.getId(), oldRefreshTokenHash, newRefreshToken, REFRESH_TOKEN_TTL_DAYS);
         if (!rotated) {
+            securityEventLogger.log("authn", String.valueOf(session.getUserId()), null, "FAIL", "refresh 轮换竞态失效");
             throw new BizException(ResultCode.TOKEN_EXPIRED, "会话已失效，请重新登录");
         }
         // 新 accessToken 新 exp，清旧吊销记录
@@ -323,6 +342,7 @@ public class AuthService {
         }
         deviceService.invalidateSession(context.getJti());
         jtiBlacklistService.revoke(context.getJti(), jwtUtil.getAccessTokenTtlSeconds());
+        securityEventLogger.log("authn", String.valueOf(context.getUserId()), null, "LOGOUT", "登出");
     }
 
     // ==================== 私有 ====================
@@ -347,11 +367,13 @@ public class AuthService {
         };
     }
 
-    private void checkUserStatus(UmsUser user) {
+    private void checkUserStatus(UmsUser user, String clientIp) {
         if (user.getUserStatus() == UserStatusEnum.FROZEN) {
+            securityEventLogger.log("account", user.getUsername(), clientIp, "FROZEN", "冻结账号尝试登录");
             throw new BizException(ResultCode.ACCOUNT_DISABLED, "账号已冻结");
         }
         if (user.getUserStatus() == UserStatusEnum.CANCELLED) {
+            securityEventLogger.log("account", user.getUsername(), clientIp, "CANCELLED", "注销账号尝试登录");
             throw new BizException(ResultCode.ACCOUNT_DELETED, "账号已注销");
         }
     }
@@ -369,16 +391,18 @@ public class AuthService {
         return security;
     }
 
-    private void checkLocked(UmsUserAccountSecurity security) {
+    private void checkLocked(UmsUserAccountSecurity security, Long userId, String clientIp) {
         if (security.getLockTime() != null && LocalDateTime.now().isBefore(security.getLockTime())) {
+            securityEventLogger.log("account", String.valueOf(userId), clientIp, "LOCKED", "锁定账号尝试登录");
             throw new BizException(ResultCode.ACCOUNT_LOCKED, "账号已锁定，请稍后再试");
         }
     }
 
-    private void increaseErrorCount(UmsUserAccountSecurity security) {
+    private void increaseErrorCount(UmsUserAccountSecurity security, String clientIp) {
         // 原子化：共享事务内 FOR UPDATE 重读安全行（uk_user_id 唯一键锁单行），
         // 读-加-写收口一处，杜绝并发错密码计数丢失；行不存在（新用户）走插入路径
         transactionTemplate.execute(status -> {
+            boolean locked = false;
             UmsUserAccountSecurity current = securityService.getOne(
                     new DefaultQueryWrapper<UmsUserAccountSecurity>()
                             .eq("user_id", security.getUserId())
@@ -388,6 +412,7 @@ public class AuthService {
                 security.setPasswordErrorCount(count);
                 if (count >= PASSWORD_ERROR_THRESHOLD) {
                     security.setLockTime(LocalDateTime.now().plusMinutes(LOCK_MINUTES));
+                    locked = true;
                 }
                 securityService.insert(security);
             } else {
@@ -395,8 +420,13 @@ public class AuthService {
                 current.setPasswordErrorCount(count);
                 if (count >= PASSWORD_ERROR_THRESHOLD) {
                     current.setLockTime(LocalDateTime.now().plusMinutes(LOCK_MINUTES));
+                    locked = true;
                 }
                 securityService.updateById(current);
+            }
+            // 仅实际触发锁定时记录安全事件（防每次错密误报锁定）；account 类事件保留完整 IP（规格 6.3）
+            if (locked) {
+                securityEventLogger.log("account", String.valueOf(security.getUserId()), clientIp, "LOCKED", "密码/OTP 错误达阈值锁定 30min");
             }
             return null;
         });

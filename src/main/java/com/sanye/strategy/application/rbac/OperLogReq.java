@@ -71,4 +71,19 @@ public class OperLogReq {
      * 错误信息（失败时）
      */
     private String errorMsg;
+
+    /**
+     * 操作对象实体/表名（如 ums_role；target 元数据，规格 7.2）
+     */
+    private String targetEntity;
+
+    /**
+     * 操作对象主键ID（规格 7.2）
+     */
+    private Long targetId;
+
+    /**
+     * 字段变更 diff（JSON 数组字符串，规格 7.1；由门面经 DiffUtils 生成，凭据剔除/PII 掩码已产生端完成）
+     */
+    private String changeDiff;
 }

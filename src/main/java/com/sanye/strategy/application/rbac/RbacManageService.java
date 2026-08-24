@@ -16,6 +16,7 @@ import com.sanye.strategy.domain.user.entity.UmsRole;
 import com.sanye.strategy.domain.user.entity.UmsUserRole;
 import com.sanye.strategy.domain.user.repository.UmsRoleService;
 import com.sanye.strategy.domain.user.repository.UmsUserRoleService;
+import com.sanye.strategy.infrastructure.logging.DiffUtils;
 import com.sanye.strategy.infrastructure.security.UserContext;
 import com.sanye.strategy.interfaces.rbac.dto.PermissionDTO;
 import com.sanye.strategy.interfaces.rbac.dto.RoleDTO;
@@ -122,6 +123,7 @@ public class RbacManageService {
                 operLogService.record(OperLogReq.builder()
                         .module(logReq.getModule()).action(logReq.getAction())
                         .desc(logReq.getDesc()).type(logReq.getType())
+                        .targetEntity(logReq.getTargetEntity()).targetId(logReq.getTargetId())
                         .success(false).errorMsg(e.getMessage()).build());
             }
             throw e;
@@ -210,7 +212,7 @@ public class RbacManageService {
                 && !dto.getRoleCode().equals(role.getRoleCode())) {
             throw new BizException(ResultCode.CONFLICT, "内置角色禁改 role_code");
         }
-        // 非内置可改 role_code（内置由上方守卫拦截）
+        UmsRole old = BeanCopyUtils.copy(role, UmsRole.class);   // diff 前置：就地 diff 旧值快照
         String originalRoleCode = role.getRoleCode();
         BeanCopyUtils.copy(dto, role, "id", "isBuiltIn", "deleted", "createTime", "updateTime");
         if (dto.getDataScope() != null) {
@@ -221,7 +223,7 @@ public class RbacManageService {
                 role.setDataScope(scope);
             }
         }
-        // 改名 → 已绑定用户 JWT roles 快照（≤30min）与实时 data_scope 解析失效，须踢角色下用户重登
+        List<Map<String, Object>> diff = DiffUtils.diffBean(old, role);
         boolean roleCodeChanged = originalRoleCode != null && !originalRoleCode.equals(role.getRoleCode());
         EvictPlan plan = roleCodeChanged
                 ? EvictPlan.builder().roleId(id).sourceDesc("角色改名 roleId=" + id).build()
@@ -230,8 +232,7 @@ public class RbacManageService {
             roleService.updateById(role);
             return null;
         }, plan,
-                OperLogReq.builder().module("rbac").action("updateRole").desc("修改角色 " + id)
-                        .type(OperTypeEnum.UPDATE).success(true).build());
+                auditLog("updateRole", "修改角色 " + id, OperTypeEnum.UPDATE, "ums_role", id, diff));
     }
 
     /**
@@ -269,15 +270,16 @@ public class RbacManageService {
                 && RoleStatusEnum.DISABLED.equals(status)) {
             throw new BizException(ResultCode.CONFLICT, "SUPER_ADMIN 不允许停用");
         }
+        UmsRole old = BeanCopyUtils.copy(role, UmsRole.class);
         role.setStatus(status);
+        List<Map<String, Object>> diff = DiffUtils.diffBean(old, role);
         EvictPlan plan = EvictPlan.builder().roleId(id)
                 .sourceDesc("角色" + (RoleStatusEnum.NORMAL.equals(status) ? "启用" : "停用") + " roleId=" + id).build();
         manageWrite(() -> {
             roleService.updateById(role);
             return null;
         }, plan,
-                OperLogReq.builder().module("rbac").action("updateRoleStatus").desc("角色 " + id + " 状态→" + status.getCode())
-                        .type(OperTypeEnum.UPDATE).success(true).build());
+                auditLog("updateRoleStatus", "角色 " + id + " 状态→" + status.getCode(), OperTypeEnum.UPDATE, "ums_role", id, diff));
     }
 
     /**
@@ -439,13 +441,14 @@ public class RbacManageService {
         if (YesNoEnum.YES.equals(p.getIsBuiltIn())) {
             throw new BizException(ResultCode.CONFLICT, "内置资源禁改");
         }
+        UmsPermission old = BeanCopyUtils.copy(p, UmsPermission.class);
         BeanCopyUtils.copy(dto, p, "id", "permissionCode", "isBuiltIn", "deleted", "createTime", "updateTime");
+        List<Map<String, Object>> diff = DiffUtils.diffBean(old, p);
         manageWrite(() -> {
             permissionService.updateById(p);
             return null;
         }, null,
-                OperLogReq.builder().module("rbac").action("updatePermission").desc("修改权限 " + id)
-                        .type(OperTypeEnum.UPDATE).success(true).build());
+                auditLog("updatePermission", "修改权限 " + id, OperTypeEnum.UPDATE, "ums_permission", id, diff));
     }
 
     /**
@@ -481,7 +484,9 @@ public class RbacManageService {
         if (YesNoEnum.YES.equals(p.getIsBuiltIn()) && RoleStatusEnum.DISABLED.equals(status)) {
             throw new BizException(ResultCode.CONFLICT, "内置资源禁停用");
         }
+        UmsPermission old = BeanCopyUtils.copy(p, UmsPermission.class);
         p.setStatus(status);
+        List<Map<String, Object>> diff = DiffUtils.diffBean(old, p);
         List<Long> roleIds = rolePermissionService.getRoleIdsByPermissionId(id);
         List<Long> userIds = collectActiveUserIds(roleIds);   // 停用/启用对称：都踢（重登同步新快照）
         EvictPlan plan = userIds.isEmpty() ? null
@@ -491,8 +496,7 @@ public class RbacManageService {
             permissionService.updateById(p);
             return null;
         }, plan,
-                OperLogReq.builder().module("rbac").action("updatePermissionStatus").desc("权限 " + id + " 状态→" + status.getCode())
-                        .type(OperTypeEnum.UPDATE).success(true).build());
+                auditLog("updatePermissionStatus", "权限 " + id + " 状态→" + status.getCode(), OperTypeEnum.UPDATE, "ums_permission", id, diff));
     }
 
     /**
@@ -535,11 +539,21 @@ public class RbacManageService {
      * 覆盖绑定：清空用户现有角色 → 写入新角色集（权限变化 → 踢该用户重登同步新快照）
      */
     public void replaceUserRoles(Long userId, List<UserRoleAssignDTO> assigns) {
+        Set<Long> before = new LinkedHashSet<>();
+        for (UmsUserRole ur : userRoleService.listEffectiveByUserId(userId)) {
+            before.add(ur.getRoleId());
+        }
+        Set<Long> after = new LinkedHashSet<>();
+        for (UserRoleAssignDTO a : (assigns == null ? List.<UserRoleAssignDTO>of() : assigns)) {
+            after.add(a.getRoleId());
+        }
+        List<Map<String, Object>> diff = DiffUtils.diffIdSet("roleIds", before, after);
         EvictPlan plan = EvictPlan.builder().userIds(List.of(userId)).sourceDesc("用户角色覆盖 userId=" + userId).build();
         manageWrite(() -> {
             userRoleService.replaceRoles(userId, toEntities(assigns), UserContext.get().getUserId());
             return null;
-        }, plan, auditLog("replaceUserRoles", "用户 " + userId + " 角色覆盖 → " + assignDesc(assigns), OperTypeEnum.GRANT));
+        }, plan, auditLog("replaceUserRoles", "用户 " + userId + " 角色覆盖 → " + assignDesc(assigns),
+                OperTypeEnum.GRANT, "ums_user_role", userId, diff));
     }
 
     /**
@@ -549,39 +563,80 @@ public class RbacManageService {
         if (begin != null && end != null && !begin.isBefore(end)) {
             throw new BizException(ResultCode.BAD_REQUEST, "begin 必须早于 end");
         }
+        // 逐用户 diff（等保要变更内容，规格附录「每用户 added roleIds」）；已绑该角色者无新增不记
+        List<Map<String, Object>> diff = new ArrayList<>();
+        for (Long uid : userIds) {
+            Set<Long> before = new LinkedHashSet<>();
+            for (UmsUserRole ur : userRoleService.listEffectiveByUserId(uid)) {
+                before.add(ur.getRoleId());
+            }
+            if (before.contains(roleId)) {
+                continue;
+            }
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("field", "roleIds");
+            entry.put("userId", uid);
+            entry.put("op", "add");
+            entry.put("ids", List.of(roleId));
+            diff.add(entry);
+        }
         EvictPlan plan = EvictPlan.builder().userIds(userIds).sourceDesc("批量授角色 roleId=" + roleId).build();
         manageWrite(() -> {
             for (Long uid : userIds) {
                 userRoleService.assignRole(uid, roleId, UserContext.get().getUserId(), begin, end);
             }
             return null;
-        }, plan, auditLog("assignRolesBatch", "批量授角色 roleId=" + roleId + " 用户数=" + userIds.size(), OperTypeEnum.GRANT));
+        }, plan, auditLog("assignRolesBatch", "批量授角色 roleId=" + roleId + " 用户数=" + userIds.size(),
+                OperTypeEnum.GRANT, "ums_user_role", roleId, diff));
     }
 
     /**
      * 解绑用户某角色（权限变化 → 踢该用户）
      */
     public boolean removeUserRole(Long userId, Long roleId) {
+        List<Map<String, Object>> diff = List.of(Map.of("field", "roleIds", "op", "remove", "ids", List.of(roleId)));
         EvictPlan plan = EvictPlan.builder().userIds(List.of(userId)).sourceDesc("解绑角色 userId=" + userId + " roleId=" + roleId).build();
         return manageWrite(() -> userRoleService.removeUserRole(userId, roleId),
-                plan, auditLog("removeUserRole", "解绑", OperTypeEnum.DELETE));
+                plan, auditLog("removeUserRole", "解绑", OperTypeEnum.DELETE, "ums_user_role", userId, diff));
     }
 
     /**
      * 单角色续期：更新某绑定 end_time（续费原地变更，权限不变化无需踢人，仅审计）
      */
     public boolean renewUserRole(Long userId, Long roleId, LocalDateTime endTime) {
-        // 续费原地变更，权限不变化无需踢人，仅审计
+        // 续费原地变更，权限不变化无需踢人，仅审计；diff 前置查绑定行取旧 end_time
+        UmsUserRole bind = userRoleService.findByUserIdAndRoleId(userId, roleId);
+        List<Map<String, Object>> diff = new ArrayList<>();
+        if (bind != null) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("field", "endTime");
+            entry.put("old", bind.getEndTime() == null ? null : bind.getEndTime().toString());
+            entry.put("new", endTime == null ? null : endTime.toString());
+            diff.add(entry);
+        }
         return manageWrite(() -> userRoleService.renew(userId, roleId, endTime), null,
-                OperLogReq.builder().module("rbac").action("renewUserRole").desc("续期 userId=" + userId + " roleId=" + roleId + " end=" + endTime)
-                        .type(OperTypeEnum.UPDATE).success(true).build());
+                auditLog("renewUserRole", "续期 userId=" + userId + " roleId=" + roleId + " end=" + endTime,
+                        OperTypeEnum.UPDATE, "ums_user_role", bind == null ? null : bind.getId(), diff));
     }
 
     /**
      * 批量续期：按绑定行 ID 反查 userId（renewById 走行主键，契约与单角色续期 renew(userId,roleId) 分离）
      */
     public int renewBatch(List<Long> bindIds, LocalDateTime endTime) {
-        // 续费原地变更，权限不变化无需踢人，仅审计
+        // 续费原地变更，权限不变化无需踢人，仅审计；批量逐条 diff（bindId 区分，规格附录）
+        List<Map<String, Object>> diff = new ArrayList<>();
+        for (Long bindId : bindIds) {
+            UmsUserRole bind = userRoleService.getById(bindId);
+            if (bind == null) {
+                continue;
+            }
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("field", "endTime");
+            entry.put("bindId", bindId);
+            entry.put("old", bind.getEndTime() == null ? null : bind.getEndTime().toString());
+            entry.put("new", endTime == null ? null : endTime.toString());
+            diff.add(entry);
+        }
         return manageWrite(() -> {
             int n = 0;
             for (Long bindId : bindIds) {
@@ -590,8 +645,8 @@ public class RbacManageService {
                 }
             }
             return n;
-        }, null, OperLogReq.builder().module("rbac").action("renewBatch").desc("批量续期 " + bindIds.size() + " 条绑定")
-                .type(OperTypeEnum.UPDATE).success(true).build());
+        }, null, auditLog("renewBatch", "批量续期 " + bindIds.size() + " 条绑定",
+                OperTypeEnum.UPDATE, "ums_user_role", null, diff));
     }
 
     // ============ 角色-权限 ============
@@ -605,38 +660,60 @@ public class RbacManageService {
                 && (permissionIds == null || permissionIds.isEmpty())) {
             throw new BizException(ResultCode.CONFLICT, "SUPER_ADMIN 禁止清空权限");
         }
+        Set<Long> before = new LinkedHashSet<>(rolePermissionService.getPermissionIdsByRoleId(roleId));
+        Set<Long> after = permissionIds == null ? new LinkedHashSet<>() : new LinkedHashSet<>(permissionIds);
+        List<Map<String, Object>> diff = DiffUtils.diffIdSet("permissionIds", before, after);
         EvictPlan plan = EvictPlan.builder().roleId(roleId).sourceDesc("角色权限覆盖 roleId=" + roleId).build();
         manageWrite(() -> {
             rolePermissionService.revokeByRoleId(roleId);
             rolePermissionService.grantBatch(roleId, permissionIds, UserContext.get().getUserId());
             return null;
-        }, plan, auditLog("replaceRolePermissions", "角色 " + roleId + " 权限覆盖 → " + permissionIds.size() + " 条", OperTypeEnum.GRANT));
+        }, plan, auditLog("replaceRolePermissions", "角色 " + roleId + " 权限覆盖 → " + permissionIds.size() + " 条",
+                OperTypeEnum.GRANT, "ums_role_permission", roleId, diff));
     }
 
     /**
      * 角色增量授权（INSERT IGNORE 静默去重，权限变化 → 踢角色下用户）
      */
     public void grantRolePermissions(Long roleId, List<Long> permissionIds) {
+        Set<Long> before = new LinkedHashSet<>(rolePermissionService.getPermissionIdsByRoleId(roleId));
+        List<Long> added = new ArrayList<>();
+        for (Long pid : permissionIds) {
+            if (!before.contains(pid)) {
+                added.add(pid);
+            }
+        }
+        List<Map<String, Object>> diff = added.isEmpty() ? List.of()
+                : List.of(Map.of("field", "permissionIds", "op", "add", "ids", added));
         EvictPlan plan = EvictPlan.builder().roleId(roleId).sourceDesc("角色增量授权 roleId=" + roleId).build();
         manageWrite(() -> {
             rolePermissionService.grantBatch(roleId, permissionIds, UserContext.get().getUserId());
             return null;
-        }, plan, OperLogReq.builder().module("rbac").action("grantRolePermissions").desc("角色 " + roleId + " 增量授权 " + permissionIds.size() + " 条")
-                .type(OperTypeEnum.GRANT).success(true).build());
+        }, plan, auditLog("grantRolePermissions", "角色 " + roleId + " 增量授权 " + permissionIds.size() + " 条",
+                OperTypeEnum.GRANT, "ums_role_permission", roleId, diff));
     }
 
     /**
      * 角色回收权限（逐条回收，权限变化 → 踢角色下用户）
      */
     public void revokeRolePermissions(Long roleId, List<Long> permissionIds) {
+        Set<Long> before = new LinkedHashSet<>(rolePermissionService.getPermissionIdsByRoleId(roleId));
+        List<Long> removed = new ArrayList<>();
+        for (Long pid : permissionIds) {
+            if (before.contains(pid)) {
+                removed.add(pid);
+            }
+        }
+        List<Map<String, Object>> diff = removed.isEmpty() ? List.of()
+                : List.of(Map.of("field", "permissionIds", "op", "remove", "ids", removed));
         EvictPlan plan = EvictPlan.builder().roleId(roleId).sourceDesc("角色回收权限 roleId=" + roleId).build();
         manageWrite(() -> {
             for (Long pid : permissionIds) {
                 rolePermissionService.revoke(roleId, pid);
             }
             return null;
-        }, plan, OperLogReq.builder().module("rbac").action("revokeRolePermissions").desc("角色 " + roleId + " 回收权限 " + permissionIds.size() + " 条")
-                .type(OperTypeEnum.DELETE).success(true).build());
+        }, plan, auditLog("revokeRolePermissions", "角色 " + roleId + " 回收权限 " + permissionIds.size() + " 条",
+                OperTypeEnum.DELETE, "ums_role_permission", roleId, diff));
     }
 
     // ============ 调试/主动失效（受 debug 开关） ============
@@ -699,15 +776,22 @@ public class RbacManageService {
     }
 
     /**
-     * 构造操作审计请求（成功态；module 固定 rbac）
+     * 构造操作审计请求（成功态；module 固定 rbac，携带 target 元数据与字段 diff——规格 7.2）
      *
-     * @param action 操作动作
-     * @param desc   操作说明
-     * @param type   操作类型
+     * @param action       操作动作
+     * @param desc         操作说明
+     * @param type         操作类型
+     * @param targetEntity 操作对象实体/表名
+     * @param targetId     操作对象主键ID
+     * @param diff         字段 diff 条目（无变更传空列表/null，经 DiffUtils 序列化落 change_diff）
      * @return 审计请求
      */
-    private OperLogReq auditLog(String action, String desc, OperTypeEnum type) {
-        return OperLogReq.builder().module("rbac").action(action).desc(desc).type(type).success(true).build();
+    private OperLogReq auditLog(String action, String desc, OperTypeEnum type,
+                                String targetEntity, Long targetId, List<Map<String, Object>> diff) {
+        return OperLogReq.builder().module("rbac").action(action).desc(desc).type(type)
+                .targetEntity(targetEntity).targetId(targetId)
+                .changeDiff(DiffUtils.toChangeDiffJson(diff))
+                .success(true).build();
     }
 
     /**

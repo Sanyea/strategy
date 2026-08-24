@@ -119,6 +119,11 @@ public class UmsUserRoleServiceImpl implements UmsUserRoleService {
     }
 
     @Override
+    public UmsUserRole findByUserIdAndRoleId(Long userId, Long roleId) {
+        return BeanCopyUtils.copy(userRoleMapper.selectByUserRole(userId, roleId), UmsUserRole.class);
+    }
+
+    @Override
     public boolean renewById(Long bindId, LocalDateTime endTime) {
         return userRoleMapper.updateEndTimeById(bindId, endTime) > 0;
     }

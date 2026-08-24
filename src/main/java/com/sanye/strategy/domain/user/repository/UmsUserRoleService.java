@@ -133,6 +133,15 @@ public interface UmsUserRoleService {
     UmsUserRole getById(Long bindId);
 
     /**
+     * 按用户+角色查绑定行（单角色续期 diff 前置：取旧 end_time 与绑定行主键做 target）
+     *
+     * @param userId 用户ID
+     * @param roleId 角色ID
+     * @return 绑定行，不存在返回 null
+     */
+    UmsUserRole findByUserIdAndRoleId(Long userId, Long roleId);
+
+    /**
      * 按绑定行 ID 续期（批量续期接口用，返回是否命中）
      *
      * @param bindId  绑定行ID

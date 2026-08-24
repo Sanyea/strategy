@@ -5,6 +5,8 @@ import com.sanye.strategy.infrastructure.security.JwtUtil;
 import com.sanye.strategy.infrastructure.security.UserContext;
 import com.sanye.strategy.common.exception.BizException;
 import com.sanye.strategy.common.response.ResultCode;
+import com.sanye.strategy.common.util.IpUtils;
+import com.sanye.strategy.infrastructure.logging.SecurityEventLogger;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -73,22 +75,26 @@ public class TokenAuthInterceptor implements HandlerInterceptor {
 
     private final JwtUtil jwtUtil;
     private final JtiBlacklistService jtiBlacklistService;
+    private final SecurityEventLogger securityEventLogger;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (!StringUtils.hasText(authHeader) || !authHeader.startsWith(BEARER_PREFIX)) {
+            securityEventLogger.log("authn", "anonymous", IpUtils.getClientIp(request), "FAIL", "缺失或非法 Authorization 头");
             throw new BizException(ResultCode.UNAUTHORIZED);
         }
         String token = authHeader.substring(BEARER_PREFIX.length()).trim();
         try {
             Claims claims = jwtUtil.parseToken(token);
             if (!TYPE_ACCESS.equals(claims.get("type", String.class))) {
+                securityEventLogger.log("authn", "anonymous", IpUtils.getClientIp(request), "FAIL", "token 类型非 ACCESS");
                 throw new BizException(ResultCode.UNAUTHORIZED);
             }
             // jti 按 RFC 7519 为 String（JwtUtil 以 String.valueOf(jti) 落串），还原会话行 ID
             Long jti = Long.valueOf(claims.get("jti", String.class));
             if (jtiBlacklistService.isRevoked(jti)) {
+                securityEventLogger.log("authn", String.valueOf(jti), IpUtils.getClientIp(request), "FAIL", "jti 黑名单命中");
                 throw new BizException(ResultCode.TOKEN_EXPIRED, "登录已失效，请重新登录");
             }
             Long userId = claims.get("userId", Number.class).longValue();
@@ -100,6 +106,7 @@ public class TokenAuthInterceptor implements HandlerInterceptor {
         } catch (JwtException | IllegalArgumentException | NullPointerException e) {
             // 验签失败 / 算法不符 / 过期 / 签名合法但 claim 缺失或类型不符（非数值 jti、缺 userId 等）
             // 统一按 401 收敛，不落 500
+            securityEventLogger.log("authn", "anonymous", IpUtils.getClientIp(request), "FAIL", "token 校验失败");
             throw new BizException(ResultCode.UNAUTHORIZED, "登录已过期，请重新登录");
         }
     }

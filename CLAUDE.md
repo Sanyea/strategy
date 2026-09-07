@@ -64,17 +64,17 @@ mvn spring-boot:run -Dspring-boot.run.profiles=test
 
 ## 技术栈
 
-> dev k8s 节点拓扑：node1 `192.168.109.130` — Kafka / MinIO / RabbitMQ / Redis；node2 `192.168.109.131` — ES / MySQL。下列端点按服务所在节点 IP 记录（NodePort 经任一节点 IP 亦可达）。
+> dev k8s 集群节点：master `192.168.254.129`（统一访问入口，NodePort 经任一节点 IP 亦可达）/ node1 / node2。中间件各组件独立部署于 dev 命名空间。镜像源：docker.io 走加速源 `docker.1ms.run`，quay.io / docker.elastic.co 直连（`bitnami/kafka` 在加速源不可用）。
 
 - Java 21，Spring Boot 4.1.0，Maven
 - MyBatis-Plus 3.5.15（`com.baomidou:mybatis-plus-spring-boot4-starter`）— ORM，支持代码生成。**须用 boot4-starter 匹配 Spring Boot 4**：boot3-starter 的自动装配在 Boot 4 下 `@ConditionalOnSingleCandidate(DataSource)` 评估过早，SqlSessionFactory 不创建
-- MySQL（dev 已接入 `application-dev.yaml`，通过 `mysql-connector-j`）— dev 连接 `192.168.109.131:30306`，库 `sys_strategy`，root 密码 `mysql123456`（k8s NodePort，清单 `k8s/mysql-dev.yaml`）
-- Redis（spring-data-redis + Lettuce，dev 已接入 `application-dev.yaml`）— dev 连接 `192.168.109.130:30379`，密码 `redis123456`（k8s NodePort，清单 `k8s/redis-dev.yaml`）；仅承载两类瞬态认证数据：accessToken jti 吊销黑名单（秒级冻结）+ MFA 挑战凭证 tempToken（5min TTL、GETDEL 单次消费），不承载会话/业务缓存
-- Kafka（已部署，代码未接入——pom 暂无 spring-kafka 依赖）— Bootstrap Server `192.168.109.130:31092`，安全协议 `SASL_PLAINTEXT`，SASL 机制 `SCRAM-SHA-256`，用户名 `user1`，密码 `8Ge87xaC6w`（接入时参照 `jwt.secret` 模式：dev 配置默认值 + 生产经 `KAFKA_PASSWORD` 环境变量覆盖，不入库不进代码）
-- Elasticsearch 8.13.4（已部署，代码未接入）— HTTP `192.168.109.131:31200`（node2），xpack 安全开启（HTTP/transport SSL 关闭），用户 `elastic` 密码 `elastic123456`；Kibana（zh-CN）`:30601`；单节点，清单 `k8s/es-kibana-dev.yaml` + `k8s/elasticsearch-dev-config.yaml`
-- MinIO（已部署，代码未接入）— S3 API `192.168.109.130:31000`，控制台 `:30001`，root 账号/密码 `minio123456`/`minio123456`，清单 `k8s/minio-dev.yaml`
-- Milvus v2.6.18（已部署，代码未接入）— standalone，gRPC NodePort `:30530`，WebUI `:30091`，root 密码 `milvus123456`（所在节点未确认，NodePort 经任一节点 IP 可达）；栈自带独立 etcd + 内部 MinIO（不与业务 MinIO 共用），清单 `k8s/milvus-stack-dev.yaml`
-- RabbitMQ 3.13-management（已部署，代码未接入）— AMQP `192.168.109.130:31672`，管理台 `:30672`，用户/密码 `rabbitmq123456`/`rabbitmq123456`，清单 `k8s/rabbitmq-dev.yaml`
+- MySQL（dev 已接入 `application-dev.yaml`，通过 `mysql-connector-j`）— dev 连接 `192.168.254.130:32060`，库 `sys_strategy`，root 密码 `root@12345`（k8s NodePort）
+- Redis（spring-data-redis + Lettuce，dev 已接入 `application-dev.yaml`）— dev 连接 `192.168.254.130:30379`，密码 `redis123456`（StatefulSet `redis-dev`，k8s NodePort）；仅承载两类瞬态认证数据：accessToken jti 吊销黑名单（秒级冻结）+ MFA 挑战凭证 tempToken（5min TTL、GETDEL 单次消费），不承载会话/业务缓存
+- Kafka（集群内未部署、代码未接入——pom 暂无 spring-kafka 依赖；镜像 `apache/kafka:3.7.2` 已备好）— 部署后补 Bootstrap Server 端点与安全凭证（接入时参照 `jwt.secret` 模式：dev 配置默认值 + 生产经 `KAFKA_PASSWORD` 环境变量覆盖，不入库不进代码）
+- Elasticsearch 8.13.4（已部署，代码未接入）— HTTP `192.168.254.129:31200`（单节点，NodePort 经任一节点 IP 可达），xpack 安全开启（HTTP/transport SSL 关闭），用户 `elastic` 密码 `elastic123456`；Kibana（zh-CN）`192.168.254.129:31201`；内置 `kibana_system` 用户密码已用 security API 手动重置为 `kibana123456`（ES 官图只自动设 elastic 密码）；ES/Kibana 非 root 容器经 `securityContext.fsGroup: 1000` 解决 CSI 卷写权限
+- MinIO（已部署，代码未接入）— S3 API `192.168.254.129:31000`，控制台 `192.168.254.129:31001`，root 账号/密码 `minio123456`/`miniosec123456`；单实例双角色：ClusterIP `milvus-minio-dev:9000` 同时供 Milvus 内部访问（`securityContext.fsGroup: 10001`）
+- Milvus v2.6.18（已部署，代码未接入）— standalone，gRPC NodePort `192.168.254.129:30530`，WebUI `192.168.254.129:30091/webui/`（**须带 `/webui/` 路径，根路径 `/` 返回 404**），root 密码 `milvus123456`；依赖集群内独立 etcd（`milvus-etcd-dev:2379`，ClusterIP 不对外，5Gi）与 MinIO（`milvus-minio-dev:9000`，与对外实例双角色复用）
+- RabbitMQ 3.13-management（已部署，代码未接入）— AMQP `192.168.254.129:31672`，管理台 `192.168.254.129:31673`，用户/密码 `rabbitmq123456`/`rabbitmq123456`（`securityContext.fsGroup: 998` 解决 CSI 卷写权限）
 - JWT（jjwt 0.12.6）— accessToken HS256 对称签名（签发与验签均显式钉死 `Jwts.SIG.HS256`，不随密钥长度推断），密钥 ≥32 字节从 `jwt.secret` 注入（`application.yaml`，生产经 `JWT_SECRET` 环境变量覆盖，不入库不进代码），TTL 30min；`jti` claim 为 String（RFC 7519，jjwt 拒绝数值型 jti），`String.valueOf(jti)` 落串、消费方 `Long.valueOf(claims.get("jti", String.class))` 还原会话行 id
 - Lombok（maven-compiler-plugin 中配置了注解处理器）
 - Spring Boot Actuator，用于健康检查/监控端点

@@ -9,6 +9,6 @@ spring:
   data:
     redis:
       host: 192.168.254.130
-      port: 32061
+      port: 30379
       database: 0
       password: redis123456

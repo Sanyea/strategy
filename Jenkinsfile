@@ -1,7 +1,7 @@
 pipeline {
     parameters {
         string(name: 'SERVICE_NAME', defaultValue: 'strategy', description: '项目名/镜像名（必填）')
-        string(name: 'IMAGE_TAG', defaultValue: 'dev-20260830', description: '镜像标签（必填）')
+        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: '镜像标签（必填，默认 latest，ArgoCD 自动收敛）')
     }
 
     agent {
@@ -15,28 +15,14 @@ metadata:
 spec:
   containers:
   - name: jnlp
-    image: jenkins/inbound-agent:3309.v27b_9314fd1a_4-1-jdk21
-    env:
-    - name: HTTP_PROXY
-      value: "http://192.168.3.23:7890"
-    - name: HTTPS_PROXY
-      value: "http://192.168.3.23:7890"
-    - name: NO_PROXY
-      value: "localhost,127.0.0.1,.svc.cluster.local,10.96.0.0/12,10.244.0.0/16,192.168.109.0/24"
+    image: 192.168.254.130:32100/library/jenkins-inbound-agent:3309.v27b_9314fd1a_4-1-jdk21
     volumeMounts:
     - name: workspace
       mountPath: /home/jenkins/agent/workspace
   - name: kaniko
-    image: gcr.io/kaniko-project/executor:v1.13.0-debug
+    image: 192.168.254.130:32100/library/kaniko-project-executor:v1.13.0-debug
     command: ["/busybox/sh"]
     args: ["-c", "mkdir -p /usr/bin && ln -sf /busybox/env /usr/bin/env && mount -t proc proc /proc > /dev/null 2>&1 || true && sleep infinity"]
-    env:
-    - name: HTTP_PROXY
-      value: "http://192.168.3.23:7890"
-    - name: HTTPS_PROXY
-      value: "http://192.168.3.23:7890"
-    - name: NO_PROXY
-      value: "localhost,127.0.0.1,.svc.cluster.local,10.96.0.0/12,10.244.0.0/16,192.168.109.0/24"
     volumeMounts:
     - name: docker-config
       mountPath: /kaniko/.docker/config.json
@@ -59,16 +45,9 @@ spec:
       runAsGroup: 0
     tty: true
   - name: maven
-    image: maven:3.9-eclipse-temurin-21
+    image: 192.168.254.130:32100/library/maven:3.9-eclipse-temurin-21
     command: ["/bin/sh"]
     args: ["-c", "sleep infinity"]
-    env:
-    - name: HTTP_PROXY
-      value: "http://192.168.3.23:7890"
-    - name: HTTPS_PROXY
-      value: "http://192.168.3.23:7890"
-    - name: NO_PROXY
-      value: "localhost,127.0.0.1,.svc.cluster.local,10.96.0.0/12,10.244.0.0/16,192.168.109.0/24"
     volumeMounts:
     - name: workspace
       mountPath: /home/jenkins/agent/workspace
@@ -98,7 +77,7 @@ spec:
     }
 
     environment {
-        HARBOR_HOST = 'harbor-release-core.harbor.svc.cluster.local:80'
+        HARBOR_HOST = 'harbor.cicd.svc:80'
     }
 
     stages {
@@ -112,7 +91,7 @@ spec:
                     }
                     echo "✅ 项目名/镜像名: ${env.SERVICE_NAME}"
                     echo "✅ 镜像标签: ${env.IMAGE_TAG}"
-                    echo "✅ Harbor 地址: ${HARBOR_HOST}"
+                    echo "✅ Harbor 地址: http://${HARBOR_HOST}"
                 }
             }
         }
@@ -167,7 +146,7 @@ spec:
             echo "镜像标签: ${env.IMAGE_TAG}"
         }
         success {
-            echo "🎉 镜像构建成功: ${HARBOR_HOST}/${SERVICE_NAME}/${SERVICE_NAME}:${IMAGE_TAG}"
+            echo "🎉 镜像构建成功: http://${HARBOR_HOST}/${SERVICE_NAME}/${SERVICE_NAME}:${IMAGE_TAG}"
         }
         failure {
             echo "❌ 构建失败，请检查日志。"

@@ -1,0 +1,25 @@
+# 生产环境配置：全部敏感值经环境变量注入，无默认值即必填（启动缺参 fail-fast）
+spring:
+  application:
+    name: strategy
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
+      password: ${REDIS_PASSWORD}
+
+jwt:
+  # 必填：≥32 字节随机串，与 dev 默认值隔离
+  secret: ${JWT_SECRET}
+
+rbac:
+  # 生产必须关闭 debug/主动失效接口（关闭时 403 防暴露接口存在）
+  debug-enabled: ${RBAC_DEBUG_ENABLED:false}
+  # 启动扫描只做新增/复活，残留停用走发布后手动 POST /rbac/permissions/sync
+  sync-on-startup: ${SYNC_ON_STARTUP:true}

@@ -1,5 +1,6 @@
 # ========== 构建阶段：Maven 出可执行 jar ==========
-FROM maven:3.9-eclipse-temurin-21 AS builder
+# 基础镜像从 Harbor library 项目内网拉取（NodePort 192.168.254.130:32100，containerd 已配 insecure）
+FROM 192.168.254.130:32100/library/maven:3.9-eclipse-temurin-21 AS builder
 WORKDIR /app
 
 # 阿里云 mirror（国内拉依赖加速）
@@ -14,7 +15,7 @@ COPY src ./src
 RUN mvn -B clean package -DskipTests
 
 # ========== 运行阶段：JRE + jar，非 root ==========
-FROM eclipse-temurin:21-jre
+FROM 192.168.254.130:32100/library/eclipse-temurin:21-jre
 WORKDIR /app
 
 # 非 root 运行

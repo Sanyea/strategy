@@ -2,13 +2,13 @@ spring:
   application:
     name: strategy
   datasource:
-    url: jdbc:mysql://192.168.109.131:30306/sys_strategy?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://192.168.254.130:32060/sys_strategy?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
-    password: mysql123456
+    password: root@12345
     driver-class-name: com.mysql.cj.jdbc.Driver
   data:
     redis:
-      host: 192.168.109.130
-      port: 30379
+      host: 192.168.254.130
+      port: 32061
       database: 0
       password: redis123456
